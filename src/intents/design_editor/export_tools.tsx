@@ -8,7 +8,6 @@ import {
 } from "@canva/app-ui-kit";
 import { requestExport } from "@canva/design";
 import type { ExportFileType } from "@canva/design";
-import { requestOpenExternalUrl } from "@canva/platform";
 
 type FormatOption = {
   label: string;
@@ -32,12 +31,10 @@ export const ExportTools = () => {
     message: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
-  const [exportUrls, setExportUrls] = useState<string[]>([]);
 
   const handleExport = useCallback(async () => {
     setLoading(true);
     setStatus(null);
-    setExportUrls([]);
 
     try {
       const response = await requestExport({
@@ -45,11 +42,10 @@ export const ExportTools = () => {
       });
 
       if (response.status === "completed") {
-        const urls = response.exportBlobs.map((b) => b.url);
-        setExportUrls(urls);
+        const count = response.exportBlobs.length;
         setStatus({
           type: "success",
-          message: `导出成功！点击下方按钮下载（共 ${urls.length} 个文件）`,
+          message: `导出完成！共 ${count} 个文件${response.title ? ` (${response.title})` : ""}`,
         });
       } else {
         setStatus({ type: "info", message: "导出已取消" });
@@ -68,7 +64,7 @@ export const ExportTools = () => {
     <Rows spacing="2u">
       <Text variant="bold">设计导出</Text>
       <Text size="small" tone="tertiary">
-        将当前设计导出为指定格式
+        点击导出后，Canva 会弹出下载对话框
       </Text>
 
       <Select
@@ -89,24 +85,6 @@ export const ExportTools = () => {
       </Button>
 
       {status && <Alert tone={status.type}>{status.message}</Alert>}
-
-      {exportUrls.length > 0 && (
-        <Rows spacing="1u">
-          <Text size="small" variant="bold">
-            下载链接：
-          </Text>
-          {exportUrls.map((url, i) => (
-            <Button
-              key={i}
-              variant="secondary"
-              onClick={() => requestOpenExternalUrl({ url })}
-              stretch
-            >
-              文件 {i + 1}
-            </Button>
-          ))}
-        </Rows>
-      )}
     </Rows>
   );
 };
