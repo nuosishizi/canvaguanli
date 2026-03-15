@@ -1,4 +1,6 @@
 import { getDesignMetadata, openDesign } from "@canva/design";
+import { getTemporaryUrl } from "@canva/asset";
+import type { ImageRef, VideoRef } from "@canva/asset";
 import type { ExportResponse } from "@canva/design";
 import type { DesignEditing } from "@canva/design";
 
@@ -8,6 +10,20 @@ export type ManifestItem = {
   type: string;
   detail: string;
 };
+
+export type AssetDownloadItem = {
+  /** 文件名前缀，如 "图片-01" */
+  label: string;
+  /** Canva 临时下载 URL */
+  url: string;
+  assetType: "image" | "video";
+  /** 从 URL 中解析出的扩展名，如 ".jpg" */
+  urlExt: string;
+};
+
+type CollectedRef =
+  | { label: string; itemIndex: number; refType: "image"; ref: ImageRef }
+  | { label: string; itemIndex: number; refType: "video"; ref: VideoRef };
 
 type Counters = {
   text: number;
@@ -44,28 +60,23 @@ const inspectRectElement = (
   element: DesignEditing.RectElement,
   items: ManifestItem[],
   counters: Counters,
+  collectedRefs: CollectedRef[],
 ) => {
   const media = element.fill.mediaContainer.ref;
 
   if (media?.type === "image") {
     counters.image += 1;
-    pushItem(
-      items,
-      `图片-${String(counters.image).padStart(2, "0")}`,
-      "image",
-      `imageRef=${media.imageRef}`,
-    );
+    const label = `图片-${String(counters.image).padStart(2, "0")}`;
+    collectedRefs.push({ label, itemIndex: items.length + 1, refType: "image", ref: media.imageRef });
+    pushItem(items, label, "image", `imageRef=${media.imageRef}`);
     return;
   }
 
   if (media?.type === "video") {
     counters.video += 1;
-    pushItem(
-      items,
-      `视频-${String(counters.video).padStart(2, "0")}`,
-      "video",
-      `videoRef=${media.videoRef}`,
-    );
+    const label = `视频-${String(counters.video).padStart(2, "0")}`;
+    collectedRefs.push({ label, itemIndex: items.length + 1, refType: "video", ref: media.videoRef });
+    pushItem(items, label, "video", `videoRef=${media.videoRef}`);
   }
 };
 
@@ -73,6 +84,7 @@ const inspectShapeElement = (
   element: DesignEditing.ShapeElement,
   items: ManifestItem[],
   counters: Counters,
+  collectedRefs: CollectedRef[],
 ) => {
   let hasMedia = false;
 
@@ -81,21 +93,15 @@ const inspectShapeElement = (
     if (media?.type === "image") {
       counters.image += 1;
       hasMedia = true;
-      pushItem(
-        items,
-        `形状图片-${String(counters.image).padStart(2, "0")}`,
-        "shape-image",
-        `imageRef=${media.imageRef}`,
-      );
+      const label = `形状图片-${String(counters.image).padStart(2, "0")}`;
+      collectedRefs.push({ label, itemIndex: items.length + 1, refType: "image", ref: media.imageRef });
+      pushItem(items, label, "shape-image", `imageRef=${media.imageRef}`);
     } else if (media?.type === "video") {
       counters.video += 1;
       hasMedia = true;
-      pushItem(
-        items,
-        `形状视频-${String(counters.video).padStart(2, "0")}`,
-        "shape-video",
-        `videoRef=${media.videoRef}`,
-      );
+      const label = `形状视频-${String(counters.video).padStart(2, "0")}`;
+      collectedRefs.push({ label, itemIndex: items.length + 1, refType: "video", ref: media.videoRef });
+      pushItem(items, label, "shape-video", `videoRef=${media.videoRef}`);
     }
   });
 
@@ -143,6 +149,7 @@ const inspectElements = (
   elements: readonly DesignEditing.AbsoluteElement[] | readonly DesignEditing.GroupContentElement[],
   items: ManifestItem[],
   counters: Counters,
+  collectedRefs: CollectedRef[],
 ) => {
   for (const element of elements) {
     switch (element.type) {
@@ -150,16 +157,16 @@ const inspectElements = (
         inspectTextElement(element, items, counters);
         break;
       case "rect":
-        inspectRectElement(element, items, counters);
+        inspectRectElement(element, items, counters, collectedRefs);
         break;
       case "shape":
-        inspectShapeElement(element, items, counters);
+        inspectShapeElement(element, items, counters, collectedRefs);
         break;
       case "embed":
         inspectEmbedElement(element, items, counters);
         break;
       case "group":
-        inspectElements(element.contents.toArray(), items, counters);
+        inspectElements(element.contents.toArray(), items, counters, collectedRefs);
         break;
       case "unsupported":
         counters.unsupported += 1;
@@ -186,20 +193,75 @@ export const buildManifest = async (response: ExportResponse) => {
     shape: 0,
     unsupported: 0,
   };
+  const collectedRefs: CollectedRef[] = [];
+  const assetDownloadItems: AssetDownloadItem[] = [];
 
   const metadata = await getDesignMetadata();
 
+  // getTemporaryUrl 必须在 openDesign 会话内调用，否则 ref 无效
   await openDesign({ type: "current_page" }, async (session) => {
     if (session.page.type === "absolute") {
-      inspectElements(session.page.elements.toArray(), items, counters);
+      inspectElements(session.page.elements.toArray(), items, counters, collectedRefs);
+
+      // 在会话内解析 ref → 临时 URL
+      await Promise.all(
+        collectedRefs.map(async (collected) => {
+          try {
+            const options =
+              collected.refType === "image"
+                ? { type: "image" as const, ref: collected.ref }
+                : { type: "video" as const, ref: collected.ref };
+            const result = await getTemporaryUrl(options);
+
+            // Canva CDN URL 不含原始文件名；用序号标签作为 ZIP 内文件名
+            // 扩展名由 server.ts 根据 Content-Type 推断
+            assetDownloadItems.push({
+              label: collected.label,
+              url: result.url,
+              assetType: collected.refType,
+              urlExt: collected.refType === "video" ? ".mp4" : ".jpg",
+            });
+
+            const item = items.find((i) => i.index === collected.itemIndex);
+            if (item) item.detail = `已收录 → 素材/${collected.label}`;
+          } catch (err) {
+            // 记录真实错误原因（Canva 内置素材、权限不足等）
+            const reason = err instanceof Error ? err.message : String(err);
+            const item = items.find((i) => i.index === collected.itemIndex);
+            if (item) {
+              const isNative =
+                reason.toLowerCase().includes("permission") ||
+                reason.toLowerCase().includes("not found") ||
+                reason.toLowerCase().includes("unauthorized");
+              item.detail += isNative
+                ? ` (Canva内置素材，无法下载)`
+                : ` (获取失败: ${reason.slice(0, 60)})`;
+            }
+          }
+        }),
+      );
     }
   });
 
+  const title =
+    response.status === "completed"
+      ? (response.title ?? metadata.title ?? "canva-export")
+      : (metadata.title ?? "canva-export");
+
+  const designTitle =
+    response.status === "completed"
+      ? (response.title ?? metadata.title ?? "未命名设计")
+      : (metadata.title ?? "未命名设计");
+
+  const exportedFileCount =
+    response.status === "completed" ? response.exportBlobs.length : 0;
+
   const lines = [
-    `设计标题: ${response.status === "completed" ? response.title ?? metadata.title ?? "未命名设计" : metadata.title ?? "未命名设计"}`,
+    `设计标题: ${designTitle}`,
     `导出时间: ${new Date().toLocaleString("zh-CN")}`,
-    `导出文件数: ${response.status === "completed" ? response.exportBlobs.length : 0}`,
-    `素材条目数: ${items.length}`,
+    `导出文件数: ${exportedFileCount}`,
+    `素材扫描范围: 仅当前显示页（SDK 限制，多页设计请逐页切换后分别导出）`,
+    `素材条目数: ${items.length}（已收录用户上传素材: ${assetDownloadItems.length} 个）`,
     "",
     "素材名称清单",
     ...items.map(
@@ -208,22 +270,20 @@ export const buildManifest = async (response: ExportResponse) => {
   ];
 
   return {
-    title: response.status === "completed" ? response.title ?? metadata.title ?? "canva-export" : metadata.title ?? "canva-export",
+    title,
     items,
     text: lines.join("\n"),
     json: JSON.stringify(
       {
-        designTitle:
-          response.status === "completed"
-            ? response.title ?? metadata.title ?? "未命名设计"
-            : metadata.title ?? "未命名设计",
-        exportedFileCount:
-          response.status === "completed" ? response.exportBlobs.length : 0,
+        designTitle,
+        exportedFileCount,
         generatedAt: new Date().toISOString(),
+        userAssetCount: assetDownloadItems.length,
         items,
       },
       null,
       2,
     ),
+    assetDownloadItems,
   };
 };

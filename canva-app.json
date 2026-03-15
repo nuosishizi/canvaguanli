@@ -10,6 +10,14 @@
       {
         "name": "canva:design:content:write",
         "type": "mandatory"
+      },
+      {
+        "name": "canva:asset:private:read",
+        "type": "mandatory"
+      },
+      {
+        "name": "canva:asset:private:write",
+        "type": "mandatory"
       }
     ]
   },
