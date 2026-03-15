@@ -5,10 +5,10 @@ import {
   Text,
   Select,
   Alert,
-  Checkbox,
 } from "@canva/app-ui-kit";
 import { requestExport } from "@canva/design";
 import type { ExportFileType } from "@canva/design";
+import { requestOpenExternalUrl } from "@canva/platform";
 
 type FormatOption = {
   label: string;
@@ -27,7 +27,6 @@ const FORMAT_OPTIONS: FormatOption[] = [
 
 export const ExportTools = () => {
   const [format, setFormat] = useState<ExportFileType>("video");
-  const [downloadAfter, setDownloadAfter] = useState(true);
   const [status, setStatus] = useState<{
     type: "success" | "info" | "warn" | "error";
     message: string;
@@ -50,14 +49,8 @@ export const ExportTools = () => {
         setExportUrls(urls);
         setStatus({
           type: "success",
-          message: `导出成功！共 ${urls.length} 个文件${response.title ? ` (${response.title})` : ""}`,
+          message: `导出成功！点击下方按钮下载（共 ${urls.length} 个文件）`,
         });
-
-        if (downloadAfter) {
-          for (const url of urls) {
-            window.open(url, "_blank");
-          }
-        }
       } else {
         setStatus({ type: "info", message: "导出已取消" });
       }
@@ -69,7 +62,7 @@ export const ExportTools = () => {
     } finally {
       setLoading(false);
     }
-  }, [format, downloadAfter]);
+  }, [format]);
 
   return (
     <Rows spacing="2u">
@@ -83,12 +76,6 @@ export const ExportTools = () => {
         value={format}
         onChange={setFormat}
         stretch
-      />
-
-      <Checkbox
-        label="导出后自动打开下载链接"
-        checked={downloadAfter}
-        onChange={setDownloadAfter}
       />
 
       <Button
@@ -112,7 +99,7 @@ export const ExportTools = () => {
             <Button
               key={i}
               variant="secondary"
-              onClick={() => window.open(url, "_blank")}
+              onClick={() => requestOpenExternalUrl({ url })}
               stretch
             >
               文件 {i + 1}
