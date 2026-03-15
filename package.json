@@ -28,6 +28,7 @@
     "@canva/intents": "^2.2.0",
     "@canva/platform": "^2.2.2",
     "@canva/user": "^2.1.3",
+    "jszip": "^3.10.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-intl": "^7.1.11"
