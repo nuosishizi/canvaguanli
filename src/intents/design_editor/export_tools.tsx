@@ -27,7 +27,7 @@ const FORMAT_OPTIONS: FormatOption[] = [
 export const ExportTools = () => {
   const [format, setFormat] = useState<ExportFileType>("video");
   const [status, setStatus] = useState<{
-    type: "success" | "info" | "warn" | "error";
+    type: "positive" | "info" | "warn" | "critical";
     message: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -44,7 +44,7 @@ export const ExportTools = () => {
       if (response.status === "completed") {
         const count = response.exportBlobs.length;
         setStatus({
-          type: "success",
+          type: "positive",
           message: `导出完成！共 ${count} 个文件${response.title ? ` (${response.title})` : ""}`,
         });
       } else {
@@ -52,7 +52,7 @@ export const ExportTools = () => {
       }
     } catch (err) {
       setStatus({
-        type: "error",
+        type: "critical",
         message: `导出失败: ${err instanceof Error ? err.message : String(err)}`,
       });
     } finally {

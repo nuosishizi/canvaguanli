@@ -14,7 +14,7 @@ export const TextTools = () => {
   const [findText, setFindText] = useState("");
   const [replaceText, setReplaceText] = useState("");
   const [status, setStatus] = useState<{
-    type: "success" | "info" | "warn" | "error";
+    type: "positive" | "info" | "warn" | "critical";
     message: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -61,7 +61,7 @@ export const TextTools = () => {
 
       if (totalReplaced > 0) {
         setStatus({
-          type: "success",
+          type: "positive",
           message: `已替换 ${totalReplaced} 处`,
         });
       } else {
@@ -69,7 +69,7 @@ export const TextTools = () => {
       }
     } catch (err) {
       setStatus({
-        type: "error",
+        type: "critical",
         message: `替换失败: ${err instanceof Error ? err.message : String(err)}`,
       });
     } finally {

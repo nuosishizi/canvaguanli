@@ -31,7 +31,7 @@ export const AudioTools = () => {
   const [mimeType, setMimeType] = useState<AudioMimeType>("audio/mp3");
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<{
-    type: "success" | "info" | "warn" | "error";
+    type: "positive" | "info" | "warn" | "critical";
     message: string;
   } | null>(null);
 
@@ -73,10 +73,10 @@ export const AudioTools = () => {
 
       await addAudioTrack({ ref: queuedAudio.ref });
 
-      setStatus({ type: "success", message: `音频 "${title}" 已添加到设计中` });
+      setStatus({ type: "positive", message: `音频 "${title}" 已添加到设计中` });
     } catch (err) {
       setStatus({
-        type: "error",
+        type: "critical",
         message: `失败: ${err instanceof Error ? err.message : String(err)}`,
       });
     } finally {
@@ -121,7 +121,7 @@ export const AudioTools = () => {
           <NumberInput
             {...props}
             value={durationMs}
-            onChange={setDurationMs}
+            onChange={(valueAsNumber) => setDurationMs(valueAsNumber)}
             placeholder="30000"
             min={1}
           />
