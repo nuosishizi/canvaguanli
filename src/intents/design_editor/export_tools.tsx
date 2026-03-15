@@ -45,7 +45,7 @@ export const ExportTools = () => {
         const count = response.exportBlobs.length;
         setStatus({
           type: "positive",
-          message: `已完成 Canva 导出流程，共 ${count} 个文件${response.title ? ` (${response.title})` : ""}。请到浏览器下载目录查看。`,
+          message: `已提交下载任务，共 ${count} 个文件${response.title ? ` (${response.title})` : ""}。如果系统没有自动开始下载，请使用 Canva 底部的下载卡片继续。`,
         });
       } else {
         setStatus({ type: "info", message: "导出已取消" });
@@ -64,10 +64,10 @@ export const ExportTools = () => {
     <Rows spacing="2u">
       <Text variant="bold">设计导出</Text>
       <Text size="small" tone="tertiary">
-        点击导出后，会打开 Canva 原生下载面板；你需要在面板里再点一次“下载”
+        点击导出后，会打开 Canva 原生下载面板，并预选你当前选择的格式
       </Text>
       <Text size="small" tone="tertiary">
-        下载后的文件由浏览器保存，通常在系统的“下载”文件夹里
+        在面板里点“下载”后，Canva 会直接发起浏览器下载
       </Text>
 
       <Select
