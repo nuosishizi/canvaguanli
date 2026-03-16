@@ -183,7 +183,68 @@ const inspectElements = (
   }
 };
 
-export const buildManifest = async (response: ExportResponse) => {
+/**
+ * 扫描当前页的用户上传素材，返回新增的下载条目。
+ * seenRefKeys  跨页去重集合（传入后会被原地修改）
+ * labelCounters 跨页序号计数器（传入后会被原地修改）
+ */
+export const scanCurrentPageAssets = async (
+  seenRefKeys: Set<string>,
+  labelCounters: { image: number; video: number },
+): Promise<AssetDownloadItem[]> => {
+  const counters: Counters = {
+    text: 0,
+    image: labelCounters.image,
+    video: labelCounters.video,
+    embed: 0,
+    shape: 0,
+    unsupported: 0,
+  };
+  const collectedRefs: CollectedRef[] = [];
+  const items: ManifestItem[] = [];
+  const newAssets: AssetDownloadItem[] = [];
+
+  await openDesign({ type: "current_page" }, async (session) => {
+    if (session.page.type === "absolute") {
+      inspectElements(session.page.elements.toArray(), items, counters, collectedRefs);
+
+      await Promise.all(
+        collectedRefs.map(async (collected) => {
+          const refKey = String(collected.ref);
+          if (seenRefKeys.has(refKey)) return; // 跨页相同素材去重
+          seenRefKeys.add(refKey);
+
+          try {
+            const options =
+              collected.refType === "image"
+                ? { type: "image" as const, ref: collected.ref }
+                : { type: "video" as const, ref: collected.ref };
+            const result = await getTemporaryUrl(options);
+            newAssets.push({
+              label: collected.label,
+              url: result.url,
+              assetType: collected.refType,
+              urlExt: collected.refType === "video" ? ".mp4" : ".jpg",
+            });
+          } catch {
+            // Canva 内置素材或无权访问，跳过
+          }
+        }),
+      );
+    }
+  });
+
+  // 更新外部计数器，使下次扫描从正确序号续编
+  labelCounters.image = counters.image;
+  labelCounters.video = counters.video;
+
+  return newAssets;
+};
+
+export const buildManifest = async (
+  response: ExportResponse,
+  preCollectedAssets?: AssetDownloadItem[],
+) => {
   const items: ManifestItem[] = [];
   const counters: Counters = {
     text: 0,
@@ -202,6 +263,9 @@ export const buildManifest = async (response: ExportResponse) => {
   await openDesign({ type: "current_page" }, async (session) => {
     if (session.page.type === "absolute") {
       inspectElements(session.page.elements.toArray(), items, counters, collectedRefs);
+
+      // 多页预扫描模式时跳过 URL 解析（使用传入的预收集素材）
+      if (preCollectedAssets) return;
 
       // 在会话内解析 ref → 临时 URL
       await Promise.all(
@@ -260,8 +324,10 @@ export const buildManifest = async (response: ExportResponse) => {
     `设计标题: ${designTitle}`,
     `导出时间: ${new Date().toLocaleString("zh-CN")}`,
     `导出文件数: ${exportedFileCount}`,
-    `素材扫描范围: 仅当前显示页（SDK 限制，多页设计请逐页切换后分别导出）`,
-    `素材条目数: ${items.length}（已收录用户上传素材: ${assetDownloadItems.length} 个）`,
+    preCollectedAssets
+      ? `素材扫描范围: 多页手动扫描汇总（共 ${preCollectedAssets.length} 个不重复用户素材）`
+      : `素材扫描范围: 仅当前显示页（SDK 限制，多页设计请逐页切换后分别导出）`,
+    `素材条目数: ${items.length}（已收录用户上传素材: ${(preCollectedAssets ?? assetDownloadItems).length} 个）`,
     "",
     "素材名称清单",
     ...items.map(
@@ -284,6 +350,6 @@ export const buildManifest = async (response: ExportResponse) => {
       null,
       2,
     ),
-    assetDownloadItems,
+    assetDownloadItems: preCollectedAssets ?? assetDownloadItems,
   };
 };

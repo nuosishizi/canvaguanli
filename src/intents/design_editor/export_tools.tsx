@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import {
   Button,
   Rows,
@@ -10,7 +10,8 @@ import {
 import { requestExport } from "@canva/design";
 import type { ExportCompleted, ExportFileType } from "@canva/design";
 import { downloadExportBundle } from "./export_bundle";
-import { buildManifest } from "./export_manifest";
+import { buildManifest, scanCurrentPageAssets } from "./export_manifest";
+import type { AssetDownloadItem } from "./export_manifest";
 
 const BOOKMARKLET =
   "javascript:(function(){if(window._cvt){clearInterval(window._cvt);}window._cvt=setInterval(function(){fetch('https://canvaguanli-production.up.railway.app/pending',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){if(d.id){clearInterval(window._cvt);window.location.href='https://canvaguanli-production.up.railway.app/download/'+d.id;}}).catch(function(){});},900);})();";
@@ -40,6 +41,13 @@ export const ExportTools = () => {
   const [bundleName, setBundleName] = useState<string | null>(null);
   const [bookmarkCopied, setBookmarkCopied] = useState(false);
 
+  // 多页扫描状态
+  const [scannedAssets, setScannedAssets] = useState<AssetDownloadItem[]>([]);
+  const [scannedPageCount, setScannedPageCount] = useState(0);
+  const [scanning, setScanning] = useState(false);
+  const seenRefKeysRef = useRef(new Set<string>());
+  const labelCountersRef = useRef({ image: 0, video: 0 });
+
   const handleExport = useCallback(async () => {
     setLoading(true);
     setStatus(null);
@@ -55,7 +63,10 @@ export const ExportTools = () => {
         const count = completedResponse.exportBlobs.length;
         setStatus({ type: "info", message: "正在打包 ZIP + 素材清单，请稍候..." });
 
-        const manifest = await buildManifest(completedResponse);
+        const manifest = await buildManifest(
+          completedResponse,
+          scannedPageCount > 0 ? scannedAssets : undefined,
+        );
         const name = await downloadExportBundle({
           response: completedResponse,
           manifestText: manifest.text,
@@ -63,11 +74,14 @@ export const ExportTools = () => {
           assetDownloadItems: manifest.assetDownloadItems,
         });
 
-        const assetCount = manifest.assetDownloadItems.length;
+        const assetCount = (scannedPageCount > 0 ? scannedAssets : manifest.assetDownloadItems).length;
+        const assetNote = scannedPageCount > 0
+          ? `已扫描 ${scannedPageCount} 页、共 ${assetCount} 个素材`
+          : `素材仅含当前页，多页请逐页点据“扫描当前页素材”`;
         setBundleName(name);
         setStatus({
           type: "positive",
-          message: `ZIP 已就绪（成品 ${count} 个 + 用户素材 ${assetCount} 个 + 清单）。注意：素材清单仅含当前页，多页设计请逐页切换后分别导出。`,
+          message: `ZIP 已就绪（成品 ${count} 个 + 用户素材 ${assetCount} 个 + 清单）。${assetNote}。`,
         });
       } else {
         setStatus({ type: "info", message: "导出已取消" });
@@ -81,7 +95,38 @@ export const ExportTools = () => {
     } finally {
       setLoading(false);
     }
-  }, [format]);
+  }, [format, scannedPageCount, scannedAssets]);
+
+  const handleScan = useCallback(async () => {
+    setScanning(true);
+    try {
+      const newAssets = await scanCurrentPageAssets(
+        seenRefKeysRef.current,
+        labelCountersRef.current,
+      );
+      setScannedAssets((prev) => [...prev, ...newAssets]);
+      setScannedPageCount((prev) => prev + 1);
+      setStatus({
+        type: "info",
+        message: `当前页扫描完成，新增 ${newAssets.length} 个素材。请切换到下一页继续扫描，或直接点“导出并打包”。`,
+      });
+    } catch (err) {
+      setStatus({
+        type: "critical",
+        message: `扫描失败: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    } finally {
+      setScanning(false);
+    }
+  }, []);
+
+  const handleClearScan = useCallback(() => {
+    setScannedAssets([]);
+    setScannedPageCount(0);
+    seenRefKeysRef.current = new Set<string>();
+    labelCountersRef.current = { image: 0, video: 0 };
+    setStatus(null);
+  }, []);
 
   return (
     <Rows spacing="2u">
@@ -109,6 +154,33 @@ export const ExportTools = () => {
         >
           {bookmarkCopied ? "✓ 已复制" : "复制书签代码"}
         </Button>
+      </Rows>
+
+      <Rows spacing="1u">
+        <Button
+          variant="secondary"
+          stretch
+          onClick={handleScan}
+          loading={scanning}
+          disabled={scanning || loading}
+        >
+          {scanning ? "扫描中..." : "扫描当前页素材"}
+        </Button>
+        {scannedPageCount > 0 && (
+          <Rows spacing="1u">
+            <Text size="small" tone="tertiary">
+              已扫 {scannedPageCount} 页 / 共 {scannedAssets.length} 个用户素材（跨页去重）
+            </Text>
+            <Button
+              variant="tertiary"
+              stretch
+              onClick={handleClearScan}
+              disabled={scanning || loading}
+            >
+              清空已扫描素材
+            </Button>
+          </Rows>
+        )}
       </Rows>
 
       <Select
