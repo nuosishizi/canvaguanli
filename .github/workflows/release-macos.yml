@@ -50,7 +50,7 @@ jobs:
           brew install create-dmg
 
           cd standalone
-          python -m PyInstaller -w -D --add-data "../dist:dist" --name CanvaTools main.py
+          python -m PyInstaller -w -D --add-data "../dist:dist" --name CanvaTools --hidden-import=server --hidden-import=calculate_app_hash --hidden-import=mam_db --hidden-import=flask_cors --hidden-import=pymysql --collect-all=cv2 --collect-all=imagehash main.py
 
           echo "=== PyInstaller dist contents ==="
           ls -la dist/

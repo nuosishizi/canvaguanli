@@ -50,7 +50,7 @@ jobs:
           Set-Location standalone
 
           # --name CanvaTools 直接命名输出目录，无需 Rename-Item
-          python -m PyInstaller -w -D --add-data "../dist;dist" --name CanvaTools main.py
+          python -m PyInstaller -w -D --add-data "../dist;dist" --name CanvaTools --hidden-import=server --hidden-import=calculate_app_hash --hidden-import=mam_db --hidden-import=flask_cors --hidden-import=pymysql --collect-all=cv2 --collect-all=imagehash main.py
 
           if (-not (Test-Path "dist\CanvaTools\CanvaTools.exe")) {
             Write-Error "PyInstaller 输出未找到 dist\CanvaTools\CanvaTools.exe"
@@ -66,20 +66,21 @@ jobs:
             'AppName=Canva Tools',
             'AppVersion=1.0',
             'AppPublisher=CanvaTools',
-            'DefaultDirName={autopf}\CanvaTools',
+            'DefaultDirName={localappdata}\CanvaTools',
             'DefaultGroupName=Canva Tools',
             'OutputDir=..\installer_out',
             'OutputBaseFilename=CanvaTools_Setup',
             'Compression=lzma',
             'SolidCompression=yes',
             'PrivilegesRequired=lowest',
+            'DisableDirPage=no',
             '',
             '[Files]',
             'Source: "dist\CanvaTools\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs',
             '',
             '[Icons]',
             'Name: "{group}\Canva Tools"; Filename: "{app}\CanvaTools.exe"',
-            'Name: "{commondesktop}\Canva Tools"; Filename: "{app}\CanvaTools.exe"',
+            'Name: "{autodesktop}\Canva Tools"; Filename: "{app}\CanvaTools.exe"',
             '',
             '[Run]',
             'Filename: "{app}\CanvaTools.exe"; Description: "Start Canva Tools"; Flags: nowait postinstall skipifsilent'

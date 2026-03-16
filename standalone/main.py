@@ -10,10 +10,12 @@ from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 import socket
 from werkzeug.serving import make_server
 
+SERVER_IMPORT_ERROR = ""
 try:
     from server import app as flask_app
-except ImportError as e:
+except Exception as e:
     flask_app = None
+    SERVER_IMPORT_ERROR = str(e)
     print(f"[!] 导入 server 失败: {e}")
 
 INSTANCE_SERVER_NAME = "CanvaToolsLocalServerSingletonV1"
@@ -395,8 +397,14 @@ class CanvaPluginServer(QWidget):
             return
 
         if flask_app is None:
-            QMessageBox.critical(self, "错误", "后端模块加载失败，请先安装依赖后重试。")
-            self.append_log("[!] 启动失败：后端模块 server 导入失败。")
+            detail = SERVER_IMPORT_ERROR or "未知错误"
+            QMessageBox.critical(
+                self,
+                "错误",
+                "后端模块加载失败，请先安装依赖后重试。\n\n"
+                f"详细原因: {detail}"
+            )
+            self.append_log(f"[!] 启动失败：后端模块 server 导入失败。原因: {detail}")
             return
 
         try:
