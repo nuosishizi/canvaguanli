@@ -111,11 +111,12 @@ class CanvaPluginServer(QWidget):
 
         self.canva_app_id_input = QLineEdit(self.config.get('canva_app_id', ''))
         self.canva_app_id_input.setPlaceholderText("例: AAFevuEFx08 （从 Canva 开发者后台复制）")
+        self.canva_app_id_input.setEchoMode(QLineEdit.Password)
         canva_layout.addRow("App ID:", self.canva_app_id_input)
 
         saved_app_id = self.config.get('canva_app_id', '')
         self.canva_bind_status_label = QLabel(
-            f"✓ 已绑定: {saved_app_id}" if saved_app_id else "未绑定（入库请求将被拒绝）"
+            "✓ 已绑定（已隐藏）" if saved_app_id else "未绑定（入库请求将被拒绝）"
         )
         self.canva_bind_status_label.setStyleSheet(
             "color: #388e3c;" if saved_app_id else "color: #d32f2f;"
@@ -224,12 +225,12 @@ class CanvaPluginServer(QWidget):
             self.canva_bind_status_label.setStyleSheet("color: #d32f2f;")
             return
         self.save_config()
-        self.canva_bind_status_label.setText(f"✓ 已绑定: {app_id}")
+        self.canva_bind_status_label.setText("✓ 已绑定（已隐藏）")
         self.canva_bind_status_label.setStyleSheet("color: #388e3c;")
-        self.append_log(f"[*] Canva App 已绑定: {app_id}")
+        self.append_log("[*] Canva App 已绑定。")
         QMessageBox.information(
             self, "绑定成功",
-            f"已成功绑定 Canva App：\n{app_id}\n\n"
+            f"已成功绑定 Canva App。\n\n"
             f"服务器将仅接受来自该 App 的入库请求。\n\n"
             f"如何获取 App ID：\n"
             f"  1. 打开 canva.com → 开发者后台\n"

@@ -4,6 +4,33 @@ Welcome to your Canva App! 🎉
 
 This is a starting point for your app using your chosen template. The complete documentation for the platform is at [canva.dev/docs/apps](https://www.canva.dev/docs/apps/).
 
+## 软件使用说明（桌面端 + Canva 插件）
+
+### 1. 启动桌面端服务（独立版）
+
+1. 打开 `standalone` 目录中的桌面程序。
+2. 在「Canva 应用绑定」填写并绑定 App ID（界面默认隐藏敏感信息）。
+3. 点击「启动服务」，确认日志中出现 `服务已成功启动于 http://localhost:xxxx`。
+
+### 2. 在 Canva 开发者后台配置插件地址
+
+1. 进入 Canva 开发者后台对应 App。
+2. 将 Development URL 设置为桌面端日志中显示的地址（例如 `http://localhost:8080`）。
+3. 打开 Canva 编辑器并进入插件。
+
+### 3. 插件内标准操作流程
+
+1. 先点击「授权 Canva」。
+2. 点击「扫描当前页素材（可选）」，多页设计可逐页扫描。
+3. 填写数据库关联信息，点击「哈希并写入到数据库」。
+4. 点击「打包导出 ZIP」，按需手动下载。
+
+### 4. 常见提示
+
+- 若提示 `缺少 Canva 身份信息`：先完成插件授权。
+- 若提示 `App ID 不匹配`：检查桌面端绑定的 App ID 是否与当前插件所属 App 一致。
+- 若提示 `打包失败：请确认本地 3001 服务已启动`：检查桌面端服务是否正常运行。
+
 **Note:** This code and documentation assumes some experience with TypeScript and React.
 
 ## Requirements

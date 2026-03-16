@@ -105,7 +105,7 @@ export const ExportTools = () => {
       setCanvaIdentity({ appId, userId, brandId });
       setStatus({
         type: "positive",
-        message: `已识别当前 Canva 账号（userId: ${userId.slice(0, 8)}...，appId: ${appId}）`,
+        message: "Canva 授权成功，可继续后续操作。",
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -269,10 +269,7 @@ export const ExportTools = () => {
           {canvaIdentity ? (
             <Rows spacing="1u">
               <Text size="small" tone="tertiary">
-                App ID: {canvaIdentity.appId}
-              </Text>
-              <Text size="small" tone="tertiary">
-                User ID: {canvaIdentity.userId.slice(0, 20)}...
+                已完成授权，账号明细已隐藏。
               </Text>
               <Button
                 variant="tertiary"
