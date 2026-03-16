@@ -4,7 +4,8 @@ import JSZip from "jszip";
 import { randomUUID } from "crypto";
 
 const app = express();
-const port = Number(process.env.CANVA_BACKEND_PORT || 3001);
+// Railway 用 PORT 环境变量；本地开发用 CANVA_BACKEND_PORT
+const port = Number(process.env.PORT || process.env.CANVA_BACKEND_PORT || 3001);
 
 app.use(express.json({ limit: "10mb" }));
 
