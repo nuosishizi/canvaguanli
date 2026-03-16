@@ -1,0 +1,13 @@
+PyQt5
+flask
+werkzeug
+flask-cors
+opencv-python
+imagehash
+psycopg2-binary
+numpy
+python-dotenv
+pandas
+pydub
+librosa
+requests
