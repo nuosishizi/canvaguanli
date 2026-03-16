@@ -1,11 +1,14 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import {
   Button,
   Rows,
   Text,
   Alert,
+  TextInput,
+  FormField,
+  Box,
 } from "@canva/app-ui-kit";
-import { requestExport } from "@canva/design";
+import { requestExport, getDesignMetadata } from "@canva/design";
 import type { ExportCompleted } from "@canva/design";
 import { preStageAssets, downloadExportBundle } from "./export_bundle";
 import { scanCurrentPageAssets } from "./export_manifest";
@@ -27,6 +30,40 @@ export const ExportTools = () => {
   const labelCountersRef = useRef({ image: 0, video: 0 });
 
   const [packing, setPacking] = useState(false);
+
+  const [creator, setCreator] = useState<string>("");
+  const [canvaId, setCanvaId] = useState<string>("");
+  const [templateName, setTemplateName] = useState<string>("");
+  const [registering, setRegistering] = useState(false);
+
+  const [generatorInit, setGeneratorInit] = useState(false);
+  useEffect(() => {
+    if (!generatorInit) {
+      getDesignMetadata().then((meta) => {
+        const now = new Date();
+        // Generate formatting like 202603151741003 (YYYYMMDDHHMMSS + random digit)
+        const yyyy = now.getFullYear();
+        const mm = String(now.getMonth() + 1).padStart(2, "0");
+        const dd = String(now.getDate()).padStart(2, "0");
+        const hh = String(now.getHours()).padStart(2, "0");
+        const min = String(now.getMinutes()).padStart(2, "0");
+        const ss = String(now.getSeconds()).padStart(2, "0");
+        const msId = yyyy + mm + dd + hh + min + ss + Math.floor(Math.random() * 10);
+        
+        setCanvaId(msId);
+        if (meta && meta.title) {
+          setTemplateName(meta.title + "【" + msId + "】");
+        } else {
+          setTemplateName("未命名设计【" + msId + "】");
+        }
+        setGeneratorInit(true);
+      }).catch((e) => console.warn("Failed to get design meta", e));
+    }
+  }, [generatorInit]);
+
+
+
+
 
 
   const handleScan = useCallback(async () => {
@@ -64,6 +101,42 @@ export const ExportTools = () => {
     labelCountersRef.current = { image: 0, video: 0 };
     setStatus(null);
   }, []);
+
+  
+  const handleRegisterDB = useCallback(async () => {
+    if (!creator) {
+       setStatus({ type: "warn", message: "人员名字 (creator) 为必填项" });
+       return;
+    }
+    if (scannedAssets.length === 0) {
+       setStatus({ type: "warn", message: "没有扫描到任何素材，请先扫描页面素材" });
+       return;
+    }
+    setRegistering(true);
+    setStatus({ type: "info", message: "正在计算 Hash 并注册到数据库..." });
+    try {
+      const res = await fetch("http://localhost:3001/register-assets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          creator,
+          canvaId,
+          templateName,
+          assets: scannedAssets,
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "请求失败");
+      }
+      setStatus({ type: "positive", message: `✓ 成功注册了 ${data.count} 个素材到数据库` });
+    } catch (err: any) {
+      setStatus({ type: "critical", message: `注册失败: ${err.message}` });
+    } finally {
+      setRegistering(false);
+    }
+  }, [creator, canvaId, templateName, scannedAssets]);
+
 
   const handleExport = useCallback(async () => {
     setPacking(true);
@@ -144,14 +217,50 @@ export const ExportTools = () => {
         )}
       </Rows>
 
+      <Box padding="1u" background="neutralLow" borderRadius="standard">
+        <Rows spacing="1u">
+          <Text variant="bold" size="small">数据库关联信息</Text>
+          <input
+            type="text"
+            placeholder="人员名字 (必填)"
+            value={creator}
+            onChange={(e) => setCreator(e.target.value)}
+            style={{ padding: "8px", borderRadius: "4px", border: "1px solid #ccc", width: "100%", boxSizing: "border-box" }}
+          />
+          <input
+            type="text"
+            placeholder="Canva 模板 ID (可选)"
+            value={canvaId}
+            onChange={(e) => setCanvaId(e.target.value)}
+            style={{ padding: "8px", borderRadius: "4px", border: "1px solid #ccc", width: "100%", boxSizing: "border-box" }}
+          />
+          <input
+            type="text"
+            placeholder="模板名称 (可选)"
+            value={templateName}
+            onChange={(e) => setTemplateName(e.target.value)}
+            style={{ padding: "8px", borderRadius: "4px", border: "1px solid #ccc", width: "100%", boxSizing: "border-box" }}
+          />
+          <Button
+            variant="primary"
+            onClick={handleRegisterDB}
+            loading={registering}
+            disabled={scanning || packing || registering}
+            stretch
+          >
+            哈希并写入到数据库
+          </Button>
+        </Rows>
+      </Box>
+
       <Button
-        variant="primary"
+        variant="secondary"
         onClick={handleExport}
         loading={packing}
-        disabled={scanning || packing}
+        disabled={scanning || packing || registering}
         stretch
       >
-        打包下载
+        打包导出ZIP
       </Button>
 
       {status && <Alert tone={status.type}>{status.message}</Alert>}

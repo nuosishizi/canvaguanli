@@ -1,0 +1,6 @@
+{
+  "creator": "test",
+  "canvaId": "123",
+  "templateName": "test",
+  "assets": [{"hash": "fakehash123", "label": "fake", "assetType": "image"}]
+}
