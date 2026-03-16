@@ -49,52 +49,92 @@ jobs:
           python -m pip install -r standalone/requirements.txt
           python -m pip install pyinstaller
 
-      - name: Build Windows package
+      - name: Build Windows installer
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           Set-Location standalone
-          python -m PyInstaller -w -D --add-data "../dist;dist" main.py
 
-          if (Test-Path "dist\CanvaToolsApp") {
-            Remove-Item -Recurse -Force "dist\CanvaToolsApp"
+          # --name CanvaTools 直接命名输出目录，无需 Rename-Item
+          python -m PyInstaller -w -D --add-data "../dist;dist" --name CanvaTools main.py
+
+          if (-not (Test-Path "dist\CanvaTools\CanvaTools.exe")) {
+            Write-Error "PyInstaller 输出未找到 dist\CanvaTools\CanvaTools.exe"
+            Get-ChildItem dist -Recurse | Select-Object FullName | Select-Object -First 30
+            exit 1
           }
 
-          if (Test-Path "dist\main") {
-            Rename-Item "dist\main" "dist\CanvaToolsApp"
+          New-Item -ItemType Directory -Force -Path "..\installer_out" | Out-Null
+
+          # 生成 Inno Setup 脚本
+          $iss = @'
+[Setup]
+AppName=Canva Tools
+AppVersion=1.0
+AppPublisher=CanvaTools
+DefaultDirName={autopf}\CanvaTools
+DefaultGroupName=Canva Tools
+OutputDir=..\installer_out
+OutputBaseFilename=CanvaTools_Setup
+Compression=lzma
+SolidCompression=yes
+PrivilegesRequired=lowest
+
+[Files]
+Source: "dist\CanvaTools\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{group}\Canva Tools"; Filename: "{app}\CanvaTools.exe"
+Name: "{commondesktop}\Canva Tools"; Filename: "{app}\CanvaTools.exe"
+
+[Run]
+Filename: "{app}\CanvaTools.exe"; Description: "启动 Canva Tools"; Flags: nowait postinstall skipifsilent
+'@
+          $iss | Set-Content -Encoding UTF8 "installer.iss"
+
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer.iss"
+
+          if (-not (Test-Path "..\installer_out\CanvaTools_Setup.exe")) {
+            Write-Error "Inno Setup 安装包未生成"
+            exit 1
           }
 
-          Compress-Archive -Path "dist\CanvaToolsApp" -DestinationPath "dist\CanvaToolsApp_Windows.zip" -Force
-
-      - name: Build macOS package
+      - name: Build macOS DMG
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          cd standalone
-          python -m PyInstaller -w -D --add-data "../dist:dist" main.py
+          brew install create-dmg
 
-          if [ -d "dist/main.app" ]; then
-            ditto -c -k --sequesterRsrc --keepParent "dist/main.app" "dist/CanvaToolsApp_macOS.zip"
-          elif [ -d "dist/main" ]; then
-            rm -rf "dist/CanvaToolsApp"
-            mv "dist/main" "dist/CanvaToolsApp"
-            ditto -c -k --sequesterRsrc --keepParent "dist/CanvaToolsApp" "dist/CanvaToolsApp_macOS.zip"
-          else
-            echo "Build output not found under standalone/dist" >&2
-            ls -la dist
+          cd standalone
+          python -m PyInstaller -w -D --add-data "../dist:dist" --name CanvaTools main.py
+
+          APP="dist/CanvaTools.app"
+          if [ ! -d "$APP" ]; then
+            echo "未找到 $APP，列出 dist 目录："
+            ls -la dist/
             exit 1
           fi
 
-      - name: Upload Windows artifact
+          mkdir -p ../installer_out
+          create-dmg \
+            --volname "CanvaTools" \
+            --window-size 540 380 \
+            --icon-size 128 \
+            --app-drop-link 380 170 \
+            "../installer_out/CanvaTools.dmg" \
+            "$APP"
+
+      - name: Upload Windows installer
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: CanvaToolsApp_Windows
-          path: standalone/dist/CanvaToolsApp_Windows.zip
+          name: CanvaTools_Windows_Installer
+          path: installer_out/CanvaTools_Setup.exe
 
-      - name: Upload macOS artifact
+      - name: Upload macOS DMG
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: CanvaToolsApp_macOS
-          path: standalone/dist/CanvaToolsApp_macOS.zip
+          name: CanvaTools_macOS_DMG
+          path: installer_out/CanvaTools.dmg
+
