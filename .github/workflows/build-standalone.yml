@@ -1,0 +1,100 @@
+name: Build Standalone Packages
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/build-standalone.yml
+      - standalone/**
+      - src/**
+      - package.json
+      - package-lock.json
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-latest
+          - macos-latest
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build frontend dist
+        run: npm run build
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r standalone/requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Build Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-Location standalone
+          python -m PyInstaller -w -D --add-data "../dist;dist" main.py
+
+          if (Test-Path "dist\CanvaToolsApp") {
+            Remove-Item -Recurse -Force "dist\CanvaToolsApp"
+          }
+
+          if (Test-Path "dist\main") {
+            Rename-Item "dist\main" "dist\CanvaToolsApp"
+          }
+
+          Compress-Archive -Path "dist\CanvaToolsApp" -DestinationPath "dist\CanvaToolsApp_Windows.zip" -Force
+
+      - name: Build macOS package
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cd standalone
+          python -m PyInstaller -w -D --add-data "../dist:dist" main.py
+
+          if [ -d "dist/main.app" ]; then
+            ditto -c -k --sequesterRsrc --keepParent "dist/main.app" "dist/CanvaToolsApp_macOS.zip"
+          elif [ -d "dist/main" ]; then
+            rm -rf "dist/CanvaToolsApp"
+            mv "dist/main" "dist/CanvaToolsApp"
+            ditto -c -k --sequesterRsrc --keepParent "dist/CanvaToolsApp" "dist/CanvaToolsApp_macOS.zip"
+          else
+            echo "Build output not found under standalone/dist" >&2
+            ls -la dist
+            exit 1
+          fi
+
+      - name: Upload Windows artifact
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: CanvaToolsApp_Windows
+          path: standalone/dist/CanvaToolsApp_Windows.zip
+
+      - name: Upload macOS artifact
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: CanvaToolsApp_macOS
+          path: standalone/dist/CanvaToolsApp_macOS.zip

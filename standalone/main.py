@@ -2,15 +2,17 @@ import sys
 import os
 import threading
 import json
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox, QTextEdit, QGroupBox, QFormLayout
+import subprocess
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox, QTextEdit, QGroupBox, QFormLayout, QCheckBox, QSystemTrayIcon, QMenu, QAction, QStyle
 from PyQt5.QtCore import pyqtSignal, QObject, QTimer
 import socket
 from werkzeug.serving import make_server
 
 try:
     from server import app as flask_app
-except ImportError:
-    pass
+except ImportError as e:
+    flask_app = None
+    print(f"[!] 导入 server 失败: {e}")
 
 class SignalEmitter(QObject):
     log_signal = pyqtSignal(str)
@@ -31,6 +33,9 @@ class CanvaPluginServer(QWidget):
         super().__init__()
         self.server_thread = None
         self.werkzeug_server = None
+        self.force_exit = False
+        self.tray_icon = None
+        self.has_shown_tray_hint = False
         self.emitter = SignalEmitter()
         self.emitter.log_signal.connect(self.append_log)
         
@@ -61,7 +66,8 @@ class CanvaPluginServer(QWidget):
                 'db_host': self.db_host.text().strip(),
                 'db_user': self.db_user.text().strip(),
                 'db_pass': self.db_pass.text().strip(),
-                'port': self.port_backend.text().strip()
+                'port': self.port_backend.text().strip(),
+                'auto_start': self.auto_start_checkbox.isChecked() if hasattr(self, 'auto_start_checkbox') else True,
             }
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(self.config, f, ensure_ascii=False, indent=2)
@@ -109,6 +115,11 @@ class CanvaPluginServer(QWidget):
         port_group.setLayout(port_layout)
         layout.addWidget(port_group)
 
+        self.auto_start_checkbox = QCheckBox("开机自动运行（默认开启）")
+        self.auto_start_checkbox.setChecked(bool(self.config.get('auto_start', True)))
+        self.auto_start_checkbox.stateChanged.connect(self.on_auto_start_changed)
+        layout.addWidget(self.auto_start_checkbox)
+
         btn_layout = QHBoxLayout()
         self.start_btn = QPushButton('启动服务')
         self.start_btn.setMinimumHeight(40)
@@ -130,6 +141,9 @@ class CanvaPluginServer(QWidget):
         layout.addWidget(self.log_area)
 
         self.setLayout(layout)
+
+        self.setup_tray_icon()
+        self.apply_startup_setting(self.auto_start_checkbox.isChecked(), silent=True)
         
         if free_port != saved_port:
             self.append_log(f"[*] 提示: 原配置端口 {saved_port} 已被占用，自动为您分配了空闲端口 {free_port}")
@@ -145,6 +159,120 @@ class CanvaPluginServer(QWidget):
             
         self.log_area.append(text)
         self.log_area.verticalScrollBar().setValue(self.log_area.verticalScrollBar().maximum())
+
+    def setup_tray_icon(self):
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            self.append_log("[!] 当前系统不支持托盘功能，关闭窗口后程序将退出。")
+            return
+
+        self.tray_icon = QSystemTrayIcon(self)
+        self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+        self.tray_icon.setToolTip("Canva 素材本地联通服务")
+
+        tray_menu = QMenu(self)
+        show_action = QAction("显示主窗口", self)
+        show_action.triggered.connect(self.show_main_window)
+        tray_menu.addAction(show_action)
+
+        tray_menu.addSeparator()
+
+        exit_action = QAction("退出程序", self)
+        exit_action.triggered.connect(self.exit_application)
+        tray_menu.addAction(exit_action)
+
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.activated.connect(self.on_tray_activated)
+        self.tray_icon.show()
+
+    def on_tray_activated(self, reason):
+        if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
+            self.show_main_window()
+
+    def show_main_window(self):
+        self.show()
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def exit_application(self):
+        self.force_exit = True
+        if self.werkzeug_server:
+            self.stop_server()
+        if self.tray_icon:
+            self.tray_icon.hide()
+        QApplication.instance().quit()
+
+    def on_auto_start_changed(self, _state):
+        self.apply_startup_setting(self.auto_start_checkbox.isChecked())
+        self.save_config()
+
+    def get_startup_command(self):
+        if getattr(sys, 'frozen', False):
+            return f'"{sys.executable}" --background'
+        script_path = os.path.abspath(__file__)
+        return f'"{sys.executable}" "{script_path}" --background'
+
+    def get_startup_args(self):
+        if getattr(sys, 'frozen', False):
+            return [sys.executable, "--background"]
+        script_path = os.path.abspath(__file__)
+        return [sys.executable, script_path, "--background"]
+
+    def apply_startup_setting(self, enabled, silent=False):
+        try:
+            if sys.platform.startswith("win"):
+                self.set_windows_startup(enabled)
+            elif sys.platform == "darwin":
+                self.set_macos_startup(enabled)
+            else:
+                if not silent:
+                    self.append_log("[*] 当前系统暂不支持自动写入开机启动项。")
+                return
+
+            if not silent:
+                self.append_log(f"[*] 开机自启动已{'启用' if enabled else '关闭'}。")
+        except Exception as e:
+            self.append_log(f"[!] 设置开机自启动失败: {e}")
+
+    def set_windows_startup(self, enabled):
+        import winreg
+
+        run_key = r"Software\Microsoft\Windows\CurrentVersion\Run"
+        value_name = "CanvaToolsLocalServer"
+
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, run_key) as key:
+            if enabled:
+                winreg.SetValueEx(key, value_name, 0, winreg.REG_SZ, self.get_startup_command())
+            else:
+                try:
+                    winreg.DeleteValue(key, value_name)
+                except FileNotFoundError:
+                    pass
+
+    def set_macos_startup(self, enabled):
+        import plistlib
+
+        label = "com.canvatools.localserver"
+        launch_agents_dir = os.path.join(os.path.expanduser("~"), "Library", "LaunchAgents")
+        os.makedirs(launch_agents_dir, exist_ok=True)
+        plist_path = os.path.join(launch_agents_dir, f"{label}.plist")
+
+        if enabled:
+            plist_data = {
+                "Label": label,
+                "ProgramArguments": self.get_startup_args(),
+                "RunAtLoad": True,
+                "KeepAlive": False,
+            }
+            with open(plist_path, "wb") as f:
+                plistlib.dump(plist_data, f)
+
+            subprocess.run(["launchctl", "unload", plist_path], capture_output=True, check=False)
+            subprocess.run(["launchctl", "load", plist_path], capture_output=True, check=False)
+        else:
+            subprocess.run(["launchctl", "unload", plist_path], capture_output=True, check=False)
+            if os.path.exists(plist_path):
+                os.remove(plist_path)
         
     def check_port_in_use(self, port):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -165,6 +293,11 @@ class CanvaPluginServer(QWidget):
 
     def start_server(self):
         if self.start_btn.isEnabled() == False:
+            return
+
+        if flask_app is None:
+            QMessageBox.critical(self, "错误", "后端模块加载失败，请先安装依赖后重试。")
+            self.append_log("[!] 启动失败：后端模块 server 导入失败。")
             return
 
         try:
@@ -199,10 +332,33 @@ class CanvaPluginServer(QWidget):
         self.start_btn.setEnabled(True)
         self.start_btn.setText("启动服务")
         self.start_btn.setStyleSheet("background-color: #4CAF50; color: white;")
+        self.stop_btn.setEnabled(False)
+        self.port_backend.setEnabled(True)
+        self.append_log("[*] 服务已停止。")
+
+    def closeEvent(self, event):
+        if self.force_exit or self.tray_icon is None:
+            event.accept()
+            return
+
+        event.ignore()
+        self.hide()
+        if not self.has_shown_tray_hint:
+            self.tray_icon.showMessage(
+                "Canva 本地服务",
+                "程序已最小化到托盘，右键托盘图标可重新打开或退出。",
+                QSystemTrayIcon.Information,
+                3000,
+            )
+            self.has_shown_tray_hint = True
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
     ex = CanvaPluginServer()
-    ex.show()
+    if "--background" in sys.argv:
+        ex.hide()
+    else:
+        ex.show()
     sys.exit(app.exec_())
 
