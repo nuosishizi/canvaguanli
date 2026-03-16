@@ -66,31 +66,31 @@ jobs:
 
           New-Item -ItemType Directory -Force -Path "..\installer_out" | Out-Null
 
-          # 生成 Inno Setup 脚本
-          $iss = @'
-[Setup]
-AppName=Canva Tools
-AppVersion=1.0
-AppPublisher=CanvaTools
-DefaultDirName={autopf}\CanvaTools
-DefaultGroupName=Canva Tools
-OutputDir=..\installer_out
-OutputBaseFilename=CanvaTools_Setup
-Compression=lzma
-SolidCompression=yes
-PrivilegesRequired=lowest
-
-[Files]
-Source: "dist\CanvaTools\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-[Icons]
-Name: "{group}\Canva Tools"; Filename: "{app}\CanvaTools.exe"
-Name: "{commondesktop}\Canva Tools"; Filename: "{app}\CanvaTools.exe"
-
-[Run]
-Filename: "{app}\CanvaTools.exe"; Description: "启动 Canva Tools"; Flags: nowait postinstall skipifsilent
-'@
-          $iss | Set-Content -Encoding UTF8 "installer.iss"
+          # 生成 Inno Setup 脚本（避免 here-string 导致 YAML 缩进错误，用数组拼接）
+          $issLines = @(
+            '[Setup]',
+            'AppName=Canva Tools',
+            'AppVersion=1.0',
+            'AppPublisher=CanvaTools',
+            'DefaultDirName={autopf}\CanvaTools',
+            'DefaultGroupName=Canva Tools',
+            'OutputDir=..\installer_out',
+            'OutputBaseFilename=CanvaTools_Setup',
+            'Compression=lzma',
+            'SolidCompression=yes',
+            'PrivilegesRequired=lowest',
+            '',
+            '[Files]',
+            'Source: "dist\CanvaTools\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs',
+            '',
+            '[Icons]',
+            'Name: "{group}\Canva Tools"; Filename: "{app}\CanvaTools.exe"',
+            'Name: "{commondesktop}\Canva Tools"; Filename: "{app}\CanvaTools.exe"',
+            '',
+            '[Run]',
+            'Filename: "{app}\CanvaTools.exe"; Description: "Start Canva Tools"; Flags: nowait postinstall skipifsilent'
+          )
+          ($issLines -join "`n") | Set-Content -Encoding UTF8 "installer.iss"
 
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "installer.iss"
 
