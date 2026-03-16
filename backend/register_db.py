@@ -24,6 +24,9 @@ def main():
     creator = data.get("creator", "")
     canva_id = data.get("canvaId", "")
     template_name = data.get("templateName", "")
+    canva_user_id = data.get("canvaUserId", "")
+    canva_app_id = data.get("canvaAppId", "")
+    canva_brand_id = data.get("canvaBrandId", "")
     assets = data.get("assets", [])
 
     if not assets:
@@ -65,7 +68,15 @@ def main():
             0,                  # file_size
             creator,            # producer
             now_str,            # created_at
-            json.dumps({"canva_id": canva_id}),  # metadata_json
+            json.dumps(
+                {
+                    "canva_id": canva_id,
+                    "canva_user_id": canva_user_id,
+                    "canva_app_id": canva_app_id,
+                    "canva_brand_id": canva_brand_id,
+                },
+                ensure_ascii=False,
+            ),  # metadata_json
             None                # thumbnail
         )
         rows_to_insert.append(row)
@@ -76,7 +87,13 @@ def main():
     # 2. 注册模板关联
     if canva_id:
         phash_list = list(unique_phash_map.keys())
-        db.add_canva_template(canva_id, template_name, creator, phash_list, "via tool plugin")
+        db.add_canva_template(
+            canva_id,
+            template_name,
+            creator,
+            phash_list,
+            f"via tool plugin; app={canva_app_id}; user={canva_user_id}",
+        )
 
     print(f"Successfully registered {len(unique_phash_map)} unique assets.")
 

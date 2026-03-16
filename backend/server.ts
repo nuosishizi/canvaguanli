@@ -455,15 +455,23 @@ app.post("/export-bundle", async (req, res) => {
 
 
 app.post("/register-assets", async (req, res) => {
-  const { creator, canvaId, templateName, assets } = req.body as {
+  const { creator, canvaId, templateName, canvaUserId, canvaAppId, canvaBrandId, assets } = req.body as {
     creator: string;
     canvaId: string;
     templateName: string;
+    canvaUserId?: string;
+    canvaAppId?: string;
+    canvaBrandId?: string;
     assets: Array<any>;
   };
 
   if (!Array.isArray(assets) || assets.length === 0) {
     res.status(400).json({ error: "No assets provided" });
+    return;
+  }
+
+  if (!canvaUserId || !canvaAppId) {
+    res.status(400).json({ error: "缺少 Canva 身份信息，请先在插件内识别当前账号" });
     return;
   }
 
@@ -509,7 +517,13 @@ app.post("/register-assets", async (req, res) => {
     const pyDbScript = path.join(__dirname, "register_db.py");
     const jsonPath = path.join(TEMP_DIR, randomUUID() + "_register.json");
     fs_sync.writeFileSync(jsonPath, JSON.stringify({
-      creator, canvaId, templateName, assets: resolvedAssets
+      creator,
+      canvaId,
+      templateName,
+      canvaUserId,
+      canvaAppId,
+      canvaBrandId,
+      assets: resolvedAssets,
     }));
     
     try {

@@ -9,10 +9,35 @@ import {
   Box,
 } from "@canva/app-ui-kit";
 import { requestExport, getDesignMetadata } from "@canva/design";
+import { auth } from "@canva/user";
 import type { ExportCompleted } from "@canva/design";
 import { preStageAssets, downloadExportBundle } from "./export_bundle";
 import { scanCurrentPageAssets } from "./export_manifest";
 import type { AssetDownloadItem } from "./export_manifest";
+
+type CanvaIdentity = {
+  appId: string;
+  userId: string;
+  brandId: string;
+};
+
+const decodeJwtPayload = (token: string): Record<string, unknown> => {
+  const tokenPart = token.split(".")[1];
+  if (!tokenPart) {
+    throw new Error("Canva 用户令牌格式无效");
+  }
+
+  const base64 = tokenPart.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+  const raw = atob(padded);
+  const utf8 = decodeURIComponent(
+    raw
+      .split("")
+      .map((c) => `%${c.charCodeAt(0).toString(16).padStart(2, "0")}`)
+      .join(""),
+  );
+  return JSON.parse(utf8) as Record<string, unknown>;
+};
 
 export const ExportTools = () => {
   const [status, setStatus] = useState<{
@@ -35,6 +60,8 @@ export const ExportTools = () => {
   const [canvaId, setCanvaId] = useState<string>("");
   const [templateName, setTemplateName] = useState<string>("");
   const [registering, setRegistering] = useState(false);
+  const [canvaIdentity, setCanvaIdentity] = useState<CanvaIdentity | null>(null);
+  const [bindingIdentity, setBindingIdentity] = useState(false);
 
   const [generatorInit, setGeneratorInit] = useState(false);
   useEffect(() => {
@@ -60,6 +87,43 @@ export const ExportTools = () => {
       }).catch((e) => console.warn("Failed to get design meta", e));
     }
   }, [generatorInit]);
+
+  const handleBindCanvaIdentity = useCallback(async () => {
+    setBindingIdentity(true);
+    try {
+      const token = await auth.getCanvaUserToken();
+      const payload = decodeJwtPayload(token);
+      const aud = payload.aud;
+      const appId = Array.isArray(aud) ? String(aud[0] || "") : String(aud || "");
+      const userId = String(payload.userId || "");
+      const brandId = String(payload.brandId || "");
+
+      if (!appId || !userId) {
+        throw new Error("未能解析出 Canva appId / userId");
+      }
+
+      setCanvaIdentity({ appId, userId, brandId });
+      setStatus({
+        type: "positive",
+        message: `已识别当前 Canva 账号（userId: ${userId.slice(0, 8)}...，appId: ${appId}）`,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setCanvaIdentity(null);
+      setStatus({
+        type: "critical",
+        message: `识别 Canva 身份失败: ${message}`,
+      });
+    } finally {
+      setBindingIdentity(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!canvaIdentity) {
+      void handleBindCanvaIdentity();
+    }
+  }, [canvaIdentity, handleBindCanvaIdentity]);
 
 
 
@@ -108,6 +172,10 @@ export const ExportTools = () => {
        setStatus({ type: "warn", message: "人员名字 (creator) 为必填项" });
        return;
     }
+     if (!canvaIdentity) {
+       setStatus({ type: "warn", message: "请先识别当前 Canva 账号，绑定 userId/appId 后再入库" });
+       return;
+     }
     if (scannedAssets.length === 0) {
        setStatus({ type: "warn", message: "没有扫描到任何素材，请先扫描页面素材" });
        return;
@@ -115,13 +183,16 @@ export const ExportTools = () => {
     setRegistering(true);
     setStatus({ type: "info", message: "正在计算 Hash 并注册到数据库..." });
     try {
-      const res = await fetch("http://localhost:3001/register-assets", {
+      const res = await fetch(`${window.BACKEND_HOST || "http://localhost:3001"}/register-assets`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           creator,
           canvaId,
           templateName,
+          canvaUserId: canvaIdentity.userId,
+          canvaAppId: canvaIdentity.appId,
+          canvaBrandId: canvaIdentity.brandId,
           assets: scannedAssets,
         })
       });
@@ -135,7 +206,7 @@ export const ExportTools = () => {
     } finally {
       setRegistering(false);
     }
-  }, [creator, canvaId, templateName, scannedAssets]);
+  }, [creator, canvaId, templateName, scannedAssets, canvaIdentity]);
 
 
   const handleExport = useCallback(async () => {
@@ -167,7 +238,7 @@ export const ExportTools = () => {
       
       // 尝试向父窗口发送下载指令 (兼容扩展)
       try {
-        const downloadUrl = `http://localhost:3001/download/${id}`;
+        const downloadUrl = `${window.BACKEND_HOST || "http://localhost:3001"}/download/${id}`;
         window.parent.postMessage({ type: 'CANVA_DOWNLOAD_RELAY', payload: { url: downloadUrl, filename: fileName } }, '*');
       } catch (e) {}
 
@@ -220,6 +291,21 @@ export const ExportTools = () => {
       <Box padding="1u" background="neutralLow" borderRadius="standard">
         <Rows spacing="1u">
           <Text variant="bold" size="small">数据库关联信息</Text>
+          <Button
+            variant="secondary"
+            onClick={handleBindCanvaIdentity}
+            loading={bindingIdentity}
+            disabled={bindingIdentity || registering || packing}
+            stretch
+          >
+            识别当前 Canva 账号
+          </Button>
+          <Text size="small" tone={canvaIdentity ? "tertiary" : "critical"}>
+            当前 App ID: {canvaIdentity?.appId || "未识别"}
+          </Text>
+          <Text size="small" tone={canvaIdentity ? "tertiary" : "critical"}>
+            当前 User ID: {canvaIdentity?.userId || "未识别"}
+          </Text>
           <input
             type="text"
             placeholder="人员名字 (必填)"
@@ -276,7 +362,7 @@ export const ExportTools = () => {
               stretch
               onClick={() => {
                 const a = document.createElement("a");
-                a.href = `http://localhost:3001/download/${downloadId}`;
+                a.href = `${window.BACKEND_HOST || "http://localhost:3001"}/download/${downloadId}`;
                 a.download = bundleName;
                 a.target = "_blank";
                 document.body.appendChild(a);

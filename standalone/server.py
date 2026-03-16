@@ -134,9 +134,15 @@ def register_assets():
     creator = data.get("creator", "")
     canva_id = data.get("canvaId", "")
     template_name = data.get("templateName", "")
+    canva_user_id = data.get("canvaUserId", "")
+    canva_app_id = data.get("canvaAppId", "")
+    canva_brand_id = data.get("canvaBrandId", "")
     assets = data.get("assets", [])
 
     print(f"[日志] 准备将 {len(assets)} 个素材注册到数据库 (Canva ID: {canva_id}, 创建者: {creator})")
+    if not canva_user_id or not canva_app_id:
+        return jsonify({"error": "缺少 Canva 身份信息，请先在插件内识别当前账号"}), 400
+
     if not assets:
         return jsonify({"error": "No assets provided"}), 400
 
@@ -185,7 +191,22 @@ def register_assets():
                 print(f"[日志] 数据库已存在跳过录入: {filename} (作者归属: {exist.get('producer')})")
                 continue
             rows_to_insert.append((
-                phash, filename, asset_type, 0, creator, now_str, json.dumps({"canva_id": canva_id}), None
+                phash,
+                filename,
+                asset_type,
+                0,
+                creator,
+                now_str,
+                json.dumps(
+                    {
+                        "canva_id": canva_id,
+                        "canva_user_id": canva_user_id,
+                        "canva_app_id": canva_app_id,
+                        "canva_brand_id": canva_brand_id,
+                    },
+                    ensure_ascii=False,
+                ),
+                None,
             ))
 
         if rows_to_insert:
@@ -194,7 +215,13 @@ def register_assets():
 
         if canva_id:
             print(f"[日志] 正在关联 Canva 模板到数据库: {template_name}")
-            db.add_canva_template(canva_id, template_name, creator, unique_hashes, "via local plugin")
+            db.add_canva_template(
+                canva_id,
+                template_name,
+                creator,
+                unique_hashes,
+                f"via local plugin; app={canva_app_id}; user={canva_user_id}",
+            )
         
         print(f"[日志] 成功完成 {len(unique_hashes)} 个素材的注册扫描流程")
         return jsonify({"success": True, "count": len(unique_hashes)})
