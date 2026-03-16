@@ -12,9 +12,10 @@ from werkzeug.serving import make_server
 
 SERVER_IMPORT_ERROR = ""
 try:
-    from server import app as flask_app
+    from server import app as flask_app, run_network_self_check as server_network_self_check
 except Exception as e:
     flask_app = None
+    server_network_self_check = None
     SERVER_IMPORT_ERROR = str(e)
     print(f"[!] 导入 server 失败: {e}")
 
@@ -57,6 +58,7 @@ class CanvaPluginServer(QWidget):
         self.force_exit = False
         self.tray_icon = None
         self.has_shown_tray_hint = False
+        self.self_check_btn = None
         self.emitter = SignalEmitter()
         self.emitter.log_signal.connect(self.append_log)
         
@@ -209,6 +211,11 @@ class CanvaPluginServer(QWidget):
         self.stop_btn.clicked.connect(self.stop_server)
         self.stop_btn.setEnabled(False)
         btn_layout.addWidget(self.stop_btn)
+
+        self.self_check_btn = QPushButton('网络自检')
+        self.self_check_btn.setMinimumHeight(40)
+        self.self_check_btn.clicked.connect(self.run_network_self_check)
+        btn_layout.addWidget(self.self_check_btn)
         
         layout.addLayout(btn_layout)
 
@@ -377,6 +384,60 @@ class CanvaPluginServer(QWidget):
     def check_port_in_use(self, port):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             return s.connect_ex(('localhost', port)) == 0
+
+    def emit_network_self_check_logs(self, result):
+        summary = result.get("summary", {}) if isinstance(result, dict) else {}
+        total = summary.get("total", 0)
+        ok_count = summary.get("ok", 0)
+        failed = summary.get("failed", max(total - ok_count, 0))
+        self.emitter.log_signal.emit(
+            f"[*] 网络自检完成：成功 {ok_count}/{total}，失败 {failed}。"
+        )
+
+        bypass_count = summary.get("proxyBypassUsed", 0)
+        if bypass_count:
+            self.emitter.log_signal.emit(
+                f"[*] 提示：有 {bypass_count} 项通过“绕过系统代理”成功，建议检查系统代理或安全软件拦截。"
+            )
+
+        for item in (result.get("details", []) if isinstance(result, dict) else []):
+            status_text = "OK" if item.get("ok") else "FAIL"
+            status_code = item.get("status")
+            method = item.get("method", "-")
+            mode = item.get("mode", "-")
+            elapsed_ms = item.get("elapsedMs", "-")
+            line = (
+                f"[自检] {status_text} {item.get('url')}"
+                f" | status={status_code}"
+                f" | method={method}"
+                f" | mode={mode}"
+                f" | {elapsed_ms}ms"
+            )
+            if not item.get("ok") and item.get("error"):
+                line += f" | {item.get('error')}"
+            self.emitter.log_signal.emit(line)
+
+    def run_network_self_check(self, startup=False):
+        if server_network_self_check is None:
+            self.emitter.log_signal.emit("[!] 网络自检不可用：server 模块未加载。")
+            return
+
+        if self.self_check_btn and not startup:
+            self.self_check_btn.setEnabled(False)
+
+        self.emitter.log_signal.emit("[*] 正在执行网络自检...")
+
+        def worker():
+            try:
+                result = server_network_self_check(timeout=8)
+                self.emit_network_self_check_logs(result)
+            except Exception as e:
+                self.emitter.log_signal.emit(f"[!] 网络自检执行失败: {e}")
+            finally:
+                if self.self_check_btn and not startup:
+                    QTimer.singleShot(0, lambda: self.self_check_btn.setEnabled(True))
+
+        threading.Thread(target=worker, daemon=True).start()
             
     def run_flask(self, port):
         try:
@@ -388,6 +449,7 @@ class CanvaPluginServer(QWidget):
             self.werkzeug_server = make_server('0.0.0.0', port, flask_app)
             self.emitter.log_signal.emit(f"[*] 服务已成功启动于 http://localhost:{port}")
             self.emitter.log_signal.emit(f"[*] Canva 插件的 Development URL 请换成此地址。")
+            self.run_network_self_check(startup=True)
             self.werkzeug_server.serve_forever()
         except Exception as e:
             self.emitter.log_signal.emit(f"[!] 运行异常: {e}")

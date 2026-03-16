@@ -4,11 +4,16 @@ import time
 import zipfile
 import uuid
 import re
+import ssl
+import traceback
 import urllib.parse
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from flask import Flask, request, jsonify, send_from_directory, make_response
 from flask_cors import CORS
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from calculate_app_hash import calculate_phash
 from mam_db import DBManager
@@ -44,7 +49,20 @@ file_store = {}
 staged_store = {}
 plugin_page_store = {}
 pending_queue = []
-executor = ThreadPoolExecutor(max_workers=10)
+executor = ThreadPoolExecutor(max_workers=4)
+
+DOWNLOAD_HEADERS = {
+    "User-Agent": "CanvaToolsStandalone/1.0",
+    "Accept": "*/*",
+    "Connection": "close",
+}
+
+SELF_CHECK_DEFAULT_URLS = [
+    "https://www.canva.com",
+    "https://www.canva.dev",
+    "https://static.canva.com",
+]
+SELF_CHECK_MAX_URLS = 10
 
 def guess_extension(content_type, fallback):
     if not content_type: return fallback
@@ -60,10 +78,261 @@ def guess_extension(content_type, fallback):
 def sanitize_filename(name):
     return re.sub(r'[\\/:*?"<>|]', '_', name).strip()
 
+def safe_url_for_log(url):
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}{parsed.path[:48]}"
+    except Exception:
+        pass
+    return (url or "")[:80]
+
+def safe_remove(path):
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except PermissionError:
+        # Windows 下视频句柄可能晚一点释放，忽略清理失败不影响主流程
+        pass
+
+def _is_permission_related_error(err):
+    text = repr(err).lower()
+    return (
+        "permission denied" in text
+        or "winerror 10013" in text
+        or "access permissions" in text
+    )
+
+def _download_via_requests(url, timeout, trust_env=True):
+    retry = Retry(
+        total=2,
+        connect=2,
+        read=2,
+        status=2,
+        backoff_factor=0.3,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(["GET"]),
+        raise_on_status=False,
+    )
+    with requests.Session() as session:
+        session.trust_env = trust_env
+        adapter = HTTPAdapter(max_retries=retry, pool_connections=20, pool_maxsize=20)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        response = session.get(
+            url,
+            timeout=(10, timeout),
+            allow_redirects=True,
+            headers=DOWNLOAD_HEADERS,
+        )
+        response.raise_for_status()
+        return response.content, {k.lower(): v for k, v in response.headers.items()}
+
+def _download_via_urllib(url, timeout):
+    req = urllib.request.Request(url, headers=DOWNLOAD_HEADERS, method="GET")
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        urllib.request.HTTPSHandler(context=ssl.create_default_context()),
+    )
+    with opener.open(req, timeout=timeout) as resp:
+        return resp.read(), {k.lower(): v for k, v in resp.headers.items()}
+
+def download_bytes(url, timeout=30):
+    first_error = None
+
+    try:
+        return _download_via_requests(url, timeout, trust_env=True)
+    except Exception as e:
+        first_error = e
+
+    if _is_permission_related_error(first_error):
+        try:
+            print(
+                f"[警告] requests 下载受限，尝试关闭系统代理重试: "
+                f"{safe_url_for_log(url)}"
+            )
+            return _download_via_requests(url, timeout, trust_env=False)
+        except Exception as e:
+            first_error = e
+
+    try:
+        return _download_via_urllib(url, timeout)
+    except Exception as e:
+        raise RuntimeError(
+            f"下载失败 url={safe_url_for_log(url)} | "
+            f"requests={repr(first_error)} | urllib={repr(e)}"
+        ) from e
+
+def _normalize_self_check_urls(urls):
+    normalized = []
+    if isinstance(urls, list):
+        for raw in urls:
+            if not isinstance(raw, str):
+                continue
+            item = raw.strip()
+            if not item:
+                continue
+            parsed = urllib.parse.urlsplit(item)
+            if parsed.scheme not in ("http", "https") or not parsed.netloc:
+                continue
+            normalized.append(item)
+            if len(normalized) >= SELF_CHECK_MAX_URLS:
+                break
+    if normalized:
+        return normalized
+    return list(SELF_CHECK_DEFAULT_URLS)
+
+def _probe_url_via_requests(url, timeout, trust_env=True):
+    retry = Retry(
+        total=1,
+        connect=1,
+        read=1,
+        status=0,
+        backoff_factor=0.2,
+        allowed_methods=frozenset(["GET"]),
+        raise_on_status=False,
+    )
+    headers = dict(DOWNLOAD_HEADERS)
+    headers["Range"] = "bytes=0-0"
+    with requests.Session() as session:
+        session.trust_env = trust_env
+        adapter = HTTPAdapter(max_retries=retry, pool_connections=5, pool_maxsize=5)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        resp = session.get(
+            url,
+            timeout=(5, timeout),
+            allow_redirects=True,
+            headers=headers,
+            stream=True,
+        )
+        status = int(resp.status_code)
+        final_url = safe_url_for_log(resp.url)
+        content_type = (resp.headers.get("content-type") or "").split(";")[0].strip()
+        content_length = resp.headers.get("content-length")
+        resp.close()
+        return {
+            "ok": True,
+            "method": "requests",
+            "mode": "trust_env" if trust_env else "no_env_proxy",
+            "status": status,
+            "finalUrl": final_url,
+            "contentType": content_type,
+            "contentLength": content_length,
+        }
+
+def _probe_url_via_urllib(url, timeout):
+    headers = dict(DOWNLOAD_HEADERS)
+    headers["Range"] = "bytes=0-0"
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        urllib.request.HTTPSHandler(context=ssl.create_default_context()),
+    )
+    with opener.open(req, timeout=timeout) as resp:
+        status = int(getattr(resp, "status", resp.getcode()))
+        final_url = safe_url_for_log(getattr(resp, "url", url) or url)
+        content_type = (resp.headers.get("content-type") or "").split(";")[0].strip()
+        content_length = resp.headers.get("content-length")
+        return {
+            "ok": True,
+            "method": "urllib",
+            "mode": "no_env_proxy",
+            "status": status,
+            "finalUrl": final_url,
+            "contentType": content_type,
+            "contentLength": content_length,
+        }
+
+def _probe_url_connectivity(url, timeout=8):
+    started = time.time()
+    first_error = None
+
+    try:
+        result = _probe_url_via_requests(url, timeout=timeout, trust_env=True)
+        result["url"] = safe_url_for_log(url)
+        result["elapsedMs"] = int((time.time() - started) * 1000)
+        return result
+    except Exception as e:
+        first_error = e
+
+    if _is_permission_related_error(first_error):
+        try:
+            result = _probe_url_via_requests(url, timeout=timeout, trust_env=False)
+            result["url"] = safe_url_for_log(url)
+            result["elapsedMs"] = int((time.time() - started) * 1000)
+            return result
+        except Exception as e:
+            first_error = e
+
+    try:
+        result = _probe_url_via_urllib(url, timeout=timeout)
+        result["url"] = safe_url_for_log(url)
+        result["elapsedMs"] = int((time.time() - started) * 1000)
+        return result
+    except Exception as e:
+        return {
+            "ok": False,
+            "url": safe_url_for_log(url),
+            "method": "none",
+            "mode": "none",
+            "status": None,
+            "finalUrl": safe_url_for_log(url),
+            "error": f"requests={repr(first_error)} | urllib={repr(e)}",
+            "elapsedMs": int((time.time() - started) * 1000),
+        }
+
+def run_network_self_check(urls=None, timeout=8):
+    try:
+        timeout = float(timeout)
+    except Exception:
+        timeout = 8
+    timeout = min(max(timeout, 3), 30)
+
+    check_urls = _normalize_self_check_urls(urls)
+    details = [_probe_url_connectivity(url, timeout=timeout) for url in check_urls]
+    ok_count = sum(1 for item in details if item.get("ok"))
+    used_no_env_proxy = sum(1 for item in details if item.get("mode") == "no_env_proxy")
+
+    return {
+        "summary": {
+            "total": len(details),
+            "ok": ok_count,
+            "failed": len(details) - ok_count,
+            "timeoutSec": timeout,
+            "proxyBypassUsed": used_no_env_proxy,
+        },
+        "details": details,
+    }
+
 @app.route('/health', methods=['GET'])
 def health():
     print("[日志] 收到健康检查请求")
     return jsonify({"ok": True})
+
+@app.route('/network-self-check', methods=['GET', 'POST'])
+def network_self_check():
+    data = request.json if request.method == 'POST' else {}
+    data = data or {}
+
+    urls = data.get("urls")
+    if not urls and isinstance(data.get("assets"), list):
+        urls = [
+            item.get("url")
+            for item in data.get("assets")
+            if isinstance(item, dict) and isinstance(item.get("url"), str)
+        ]
+
+    single_url = request.args.get("url")
+    if single_url and isinstance(single_url, str):
+        if isinstance(urls, list):
+            urls = urls + [single_url]
+        else:
+            urls = [single_url]
+
+    timeout = data.get("timeout", request.args.get("timeout", 8))
+    result = run_network_self_check(urls=urls, timeout=timeout)
+    return jsonify(result)
 
 @app.route('/pre-stage-assets', methods=['POST'])
 def pre_stage_assets():
@@ -76,30 +345,27 @@ def pre_stage_assets():
     def process_asset(asset):
         try:
             print(f"[日志] 正在下载素材: {asset.get('label')} ...")
-            r = requests.get(asset['url'], timeout=30)
-            if r.status_code != 200: 
-                print(f"[错误] 下载素材失败: {asset.get('label')}")
-                return None
+            content, headers = download_bytes(asset['url'], timeout=30)
 
             fallback_ext = asset.get('urlExt') or (".mp4" if asset.get('assetType') == 'video' else ".jpg")
-            ext = guess_extension(r.headers.get("content-type"), fallback_ext)
+            ext = guess_extension(headers.get("content-type"), fallback_ext)
             filename = f"{sanitize_filename(asset['label'])}{ext}"
 
             staged_id = str(uuid.uuid4())
             temp_path = os.path.join(TEMP_DIR, f"{staged_id}_{filename}")
             with open(temp_path, "wb") as f:
-                f.write(r.content)
+                f.write(content)
 
             print(f"[日志] 正在计算指纹(pHash): {filename}")
             phash = calculate_phash(temp_path) or ""
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
+            safe_remove(temp_path)
 
             staged_store[staged_id] = {"hash": phash, "fileName": filename}
             print(f"[日志] 素材 {filename} 预处理完成 (指纹: {phash[:8]}...)")
             return {"stagedId": staged_id, "label": asset['label']}
         except Exception as e:
-            print(f"[错误] 预处理过程发生异常: {e}")
+            print(f"[错误] 预处理过程发生异常: {repr(e)}")
+            print(traceback.format_exc(limit=1).strip())
             return None
 
     results = list(executor.map(process_asset, assets))
@@ -115,17 +381,17 @@ def add_page_blob():
 
     print(f"[日志] 收到录入页面请求 (第 {data.get('pageNum')} 页)")
     try:
-        r = requests.get(url, timeout=60)
+        content, _headers = download_bytes(url, timeout=60)
         ext = data.get("ext", "mp4")
         safe_name = sanitize_filename(data.get("projectName") or "Canva")
         page_num = str(data.get("pageNum", 0)).zfill(2)
         filename = f"{safe_name}_Page{page_num}.{ext}"
 
-        plugin_page_store[filename] = {"buffer": r.content, "fileName": filename}
+        plugin_page_store[filename] = {"buffer": content, "fileName": filename}
         print(f"[日志] 页面暂存成功: {filename}")
         return jsonify({"ok": True})
     except Exception as e:
-        print(f"[错误] 页面暂存失败: {e}")
+        print(f"[错误] 页面暂存失败: {repr(e)}")
         return jsonify({"ok": False})
 
 @app.route('/register-assets', methods=['POST'])
@@ -158,19 +424,18 @@ def register_assets():
             return staged_store[staged_id]['hash'], staged_store[staged_id]['fileName'], asset.get('assetType')
         try:
             print(f"[日志] 正在直接拉取并注册: {asset['label']}")
-            r = requests.get(asset['url'], timeout=30)
-            if r.status_code != 200: return None
-            ext = guess_extension(r.headers.get("content-type"), ".mp4" if asset.get('assetType') == 'video' else ".jpg")
+            content, headers = download_bytes(asset['url'], timeout=30)
+            ext = guess_extension(headers.get("content-type"), ".mp4" if asset.get('assetType') == 'video' else ".jpg")
             filename = sanitize_filename(asset['label']) + ext
             temp_path = os.path.join(TEMP_DIR, f"{uuid.uuid4()}_{filename}")
             with open(temp_path, "wb") as f:
-                f.write(r.content)
+                f.write(content)
             print(f"[日志] 正在计算直接拉取文件的指纹: {filename}")
             phash = calculate_phash(temp_path) or ""
-            if os.path.exists(temp_path): os.remove(temp_path)
+            safe_remove(temp_path)
             return phash, filename, asset.get('assetType')
         except Exception as e:
-            print(f"[错误] 直接注册拉取失败: {e}")
+            print(f"[错误] 直接注册拉取失败: {repr(e)}")
             return None
 
     results = list(executor.map(process_reg, assets))
