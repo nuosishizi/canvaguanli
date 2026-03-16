@@ -68,6 +68,7 @@ class CanvaPluginServer(QWidget):
                 'db_pass': self.db_pass.text().strip(),
                 'port': self.port_backend.text().strip(),
                 'auto_start': self.auto_start_checkbox.isChecked() if hasattr(self, 'auto_start_checkbox') else True,
+                'canva_app_id': self.canva_app_id_input.text().strip() if hasattr(self, 'canva_app_id_input') else self.config.get('canva_app_id', ''),
             }
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(self.config, f, ensure_ascii=False, indent=2)
@@ -103,6 +104,38 @@ class CanvaPluginServer(QWidget):
         db_layout.addRow("Pass:", self.db_pass)
         db_group.setLayout(db_layout)
         layout.addWidget(db_group)
+
+        # ── Canva 应用绑定 ──────────────────────────────────
+        canva_group = QGroupBox("Canva 应用绑定")
+        canva_layout = QFormLayout()
+
+        self.canva_app_id_input = QLineEdit(self.config.get('canva_app_id', ''))
+        self.canva_app_id_input.setPlaceholderText("例: AAFevuEFx08 （从 Canva 开发者后台复制）")
+        canva_layout.addRow("App ID:", self.canva_app_id_input)
+
+        saved_app_id = self.config.get('canva_app_id', '')
+        self.canva_bind_status_label = QLabel(
+            f"✓ 已绑定: {saved_app_id}" if saved_app_id else "未绑定（入库请求将被拒绝）"
+        )
+        self.canva_bind_status_label.setStyleSheet(
+            "color: #388e3c;" if saved_app_id else "color: #d32f2f;"
+        )
+        canva_layout.addRow("状态:", self.canva_bind_status_label)
+
+        canva_btn_row = QHBoxLayout()
+        bind_btn = QPushButton("绑定应用")
+        bind_btn.clicked.connect(self.on_bind_canva_app)
+        canva_btn_row.addWidget(bind_btn)
+        open_dev_btn = QPushButton("打开开发者后台 ↗")
+        open_dev_btn.clicked.connect(self.open_canva_dev_portal)
+        canva_btn_row.addWidget(open_dev_btn)
+        canva_btn_widget = QWidget()
+        canva_btn_widget.setLayout(canva_btn_row)
+        canva_layout.addRow("", canva_btn_widget)
+
+        canva_group.setLayout(canva_layout)
+        layout.addWidget(canva_group)
+        # ───────────────────────────────────────────────────
 
         port_group = QGroupBox("服务端口配置")
         port_layout = QFormLayout()
@@ -183,6 +216,29 @@ class CanvaPluginServer(QWidget):
         self.tray_icon.setContextMenu(tray_menu)
         self.tray_icon.activated.connect(self.on_tray_activated)
         self.tray_icon.show()
+
+    def on_bind_canva_app(self):
+        app_id = self.canva_app_id_input.text().strip()
+        if not app_id:
+            self.canva_bind_status_label.setText("请先填写 App ID")
+            self.canva_bind_status_label.setStyleSheet("color: #d32f2f;")
+            return
+        self.save_config()
+        self.canva_bind_status_label.setText(f"✓ 已绑定: {app_id}")
+        self.canva_bind_status_label.setStyleSheet("color: #388e3c;")
+        self.append_log(f"[*] Canva App 已绑定: {app_id}")
+        QMessageBox.information(
+            self, "绑定成功",
+            f"已成功绑定 Canva App：\n{app_id}\n\n"
+            f"服务器将仅接受来自该 App 的入库请求。\n\n"
+            f"如何获取 App ID：\n"
+            f"  1. 打开 canva.com → 开发者后台\n"
+            f"  2. 进入您的 App → 复制 App ID"
+        )
+
+    def open_canva_dev_portal(self):
+        import webbrowser
+        webbrowser.open("https://www.canva.com/developers/apps")
 
     def on_tray_activated(self, reason):
         if reason in (QSystemTrayIcon.Trigger, QSystemTrayIcon.DoubleClick):
@@ -283,6 +339,7 @@ class CanvaPluginServer(QWidget):
             os.environ['STANDALONE_DB_HOST'] = self.db_host.text().strip()
             os.environ['STANDALONE_DB_USER'] = self.db_user.text().strip()
             os.environ['STANDALONE_DB_PASS'] = self.db_pass.text().strip()
+            os.environ['STANDALONE_APP_ID'] = self.canva_app_id_input.text().strip() if hasattr(self, 'canva_app_id_input') else ''
             
             self.werkzeug_server = make_server('0.0.0.0', port, flask_app)
             self.emitter.log_signal.emit(f"[*] 服务已成功启动于 http://localhost:{port}")

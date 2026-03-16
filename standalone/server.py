@@ -141,7 +141,12 @@ def register_assets():
 
     print(f"[日志] 准备将 {len(assets)} 个素材注册到数据库 (Canva ID: {canva_id}, 创建者: {creator})")
     if not canva_user_id or not canva_app_id:
-        return jsonify({"error": "缺少 Canva 身份信息，请先在插件内识别当前账号"}), 400
+        return jsonify({"error": "缺少 Canva 身份信息，请先在插件内完成授权识别"}), 400
+
+    # 验证 App ID 是否与独立应用绑定的 App 一致
+    standalone_app_id = os.environ.get('STANDALONE_APP_ID', '').strip()
+    if standalone_app_id and canva_app_id != standalone_app_id:
+        return jsonify({"error": f"App ID 不匹配：本服务已绑定到 App {standalone_app_id}，请求来自 App {canva_app_id}。请在独立应用中检查"Canva 应用绑定"配置。"}), 403
 
     if not assets:
         return jsonify({"error": "No assets provided"}), 400

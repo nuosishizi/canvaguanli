@@ -260,7 +260,52 @@ export const ExportTools = () => {
     <Rows spacing="2u">
       <Text variant="bold">设计导出</Text>
 
-      {/* 素材扫描区 */}
+      {/* ① Canva 授权 */}
+      <Box padding="1u" background="neutralLow" borderRadius="standard">
+        <Rows spacing="1u">
+          <Text variant="bold" size="small">
+            {canvaIdentity ? "① Canva 已授权 ✓" : "① 授权 Canva（必须先完成）"}
+          </Text>
+          {canvaIdentity ? (
+            <Rows spacing="1u">
+              <Text size="small" tone="tertiary">
+                App ID: {canvaIdentity.appId}
+              </Text>
+              <Text size="small" tone="tertiary">
+                User ID: {canvaIdentity.userId.slice(0, 20)}...
+              </Text>
+              <Button
+                variant="tertiary"
+                stretch
+                onClick={handleBindCanvaIdentity}
+                loading={bindingIdentity}
+                disabled={bindingIdentity}
+              >
+                重新授权
+              </Button>
+            </Rows>
+          ) : (
+            <Rows spacing="1u">
+              {!bindingIdentity && (
+                <Text size="small" tone="critical">
+                  未授权，写入数据库功能将被拒绝
+                </Text>
+              )}
+              <Button
+                variant="primary"
+                stretch
+                onClick={handleBindCanvaIdentity}
+                loading={bindingIdentity}
+                disabled={bindingIdentity}
+              >
+                {bindingIdentity ? "授权中..." : "授权并识别 Canva 账号"}
+              </Button>
+            </Rows>
+          )}
+        </Rows>
+      </Box>
+
+      {/* ② 素材扫描区 */}
       <Rows spacing="1u">
         <Button
           variant="secondary"
@@ -269,7 +314,7 @@ export const ExportTools = () => {
           loading={scanning}
           disabled={scanning || packing}
         >
-          {scanning ? "扫描中..." : "扫描当前页素材（可选）"}
+          {scanning ? "扫描中..." : "② 扫描当前页素材（可选）"}
         </Button>
         {scannedPageCount > 0 && (
           <Rows spacing="1u">
@@ -290,22 +335,7 @@ export const ExportTools = () => {
 
       <Box padding="1u" background="neutralLow" borderRadius="standard">
         <Rows spacing="1u">
-          <Text variant="bold" size="small">数据库关联信息</Text>
-          <Button
-            variant="secondary"
-            onClick={handleBindCanvaIdentity}
-            loading={bindingIdentity}
-            disabled={bindingIdentity || registering || packing}
-            stretch
-          >
-            识别当前 Canva 账号
-          </Button>
-          <Text size="small" tone={canvaIdentity ? "tertiary" : "critical"}>
-            当前 App ID: {canvaIdentity?.appId || "未识别"}
-          </Text>
-          <Text size="small" tone={canvaIdentity ? "tertiary" : "critical"}>
-            当前 User ID: {canvaIdentity?.userId || "未识别"}
-          </Text>
+          <Text variant="bold" size="small">③ 数据库关联信息</Text>
           <input
             type="text"
             placeholder="人员名字 (必填)"
@@ -339,6 +369,7 @@ export const ExportTools = () => {
         </Rows>
       </Box>
 
+      {/* ④ 打包导出 */}
       <Button
         variant="secondary"
         onClick={handleExport}
@@ -346,7 +377,7 @@ export const ExportTools = () => {
         disabled={scanning || packing || registering}
         stretch
       >
-        打包导出ZIP
+        ④ 打包导出 ZIP
       </Button>
 
       {status && <Alert tone={status.type}>{status.message}</Alert>}
