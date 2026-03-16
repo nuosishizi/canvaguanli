@@ -1,0 +1,114 @@
+name: Release macOS Package
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  RELEASE_TAG: build-${{ github.sha }}
+  RELEASE_NAME: Build ${{ github.sha }}
+
+jobs:
+  release-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build frontend dist
+        run: npm run build
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r standalone/requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Build macOS DMG
+        shell: bash
+        run: |
+          brew install create-dmg
+
+          cd standalone
+          python -m PyInstaller -w -D --add-data "../dist:dist" --name CanvaTools main.py
+
+          echo "=== PyInstaller dist contents ==="
+          ls -la dist/
+
+          if [ -d "dist/CanvaTools.app" ]; then
+            APP="dist/CanvaTools.app"
+          elif [ -d "dist/CanvaTools" ]; then
+            mkdir -p "dist/CanvaTools.app/Contents/MacOS"
+            cp -r "dist/CanvaTools/" "dist/CanvaTools.app/Contents/MacOS/"
+            APP="dist/CanvaTools.app"
+          else
+            echo "ERROR: PyInstaller output not found"
+            ls -la dist/
+            exit 1
+          fi
+
+          mkdir -p ../installer_out
+          create-dmg \
+            --volname "CanvaTools" \
+            --window-size 540 380 \
+            --icon-size 128 \
+            --app-drop-link 380 170 \
+            "../installer_out/CanvaTools.dmg" \
+            "$APP"
+
+      - name: Upload macOS DMG artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: CanvaTools_macOS_DMG
+          path: installer_out/CanvaTools.dmg
+
+      - name: Publish macOS DMG to Release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          tag="${RELEASE_TAG}"
+          title="${RELEASE_NAME}"
+          notes="Automated build for commit ${{ github.sha }}"
+
+          ready=false
+          for i in 1 2 3 4 5; do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+
+            if gh release create "$tag" --title "$title" --notes "$notes" >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+
+            sleep 3
+          done
+
+          if [ "$ready" != "true" ]; then
+            echo "Failed to create or find release $tag"
+            exit 1
+          fi
+
+          gh release upload "$tag" "installer_out/CanvaTools.dmg" --clobber
