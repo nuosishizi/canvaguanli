@@ -146,7 +146,7 @@ def register_assets():
     # 验证 App ID 是否与独立应用绑定的 App 一致
     standalone_app_id = os.environ.get('STANDALONE_APP_ID', '').strip()
     if standalone_app_id and canva_app_id != standalone_app_id:
-        return jsonify({"error": f"App ID 不匹配：本服务已绑定到 App {standalone_app_id}，请求来自 App {canva_app_id}。请在独立应用中检查"Canva 应用绑定"配置。"}), 403
+        return jsonify({"error": f"App ID 不匹配：本服务已绑定到 App {standalone_app_id}，请求来自 App {canva_app_id}。请在独立应用\"Canva应用绑定\"一栏核对配置。"}), 403
 
     if not assets:
         return jsonify({"error": "No assets provided"}), 400
