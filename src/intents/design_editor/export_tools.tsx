@@ -264,7 +264,7 @@ export const ExportTools = () => {
       <Box padding="1u" background="neutralLow" borderRadius="standard">
         <Rows spacing="1u">
           <Text variant="bold" size="small">
-            {canvaIdentity ? "① Canva 已授权 ✓" : "① 授权 Canva（必须先完成）"}
+            {canvaIdentity ? "Canva 已授权 ✓" : "授权 Canva（必须先完成）"}
           </Text>
           {canvaIdentity ? (
             <Rows spacing="1u">
@@ -305,13 +305,13 @@ export const ExportTools = () => {
       {/* ② 素材扫描区 */}
       <Rows spacing="1u">
         <Button
-          variant="secondary"
+          variant="primary"
           stretch
           onClick={handleScan}
           loading={scanning}
           disabled={scanning || packing}
         >
-          {scanning ? "扫描中..." : "② 扫描当前页素材（可选）"}
+          {scanning ? "扫描中..." : "扫描当前页素材（可选）"}
         </Button>
         {scannedPageCount > 0 && (
           <Rows spacing="1u">
@@ -332,7 +332,7 @@ export const ExportTools = () => {
 
       <Box padding="1u" background="neutralLow" borderRadius="standard">
         <Rows spacing="1u">
-          <Text variant="bold" size="small">③ 数据库关联信息</Text>
+          <Text variant="bold" size="small">数据库关联信息</Text>
           <input
             type="text"
             placeholder="人员名字 (必填)"
@@ -366,16 +366,25 @@ export const ExportTools = () => {
         </Rows>
       </Box>
 
-      {/* ④ 打包导出 */}
-      <Button
-        variant="secondary"
+      {/* 打包导出 */}
+      <button
         onClick={handleExport}
-        loading={packing}
         disabled={scanning || packing || registering}
-        stretch
+        style={{
+          width: "100%",
+          padding: "10px 16px",
+          background: scanning || packing || registering ? "#9ca3af" : "linear-gradient(to right, #059669, #10b981)",
+          color: "white",
+          border: "none",
+          borderRadius: "8px",
+          cursor: scanning || packing || registering ? "not-allowed" : "pointer",
+          fontSize: "14px",
+          fontWeight: "600",
+          letterSpacing: "0.3px",
+        }}
       >
-        ④ 打包导出 ZIP
-      </Button>
+        {packing ? "打包中..." : "打包导出 ZIP"}
+      </button>
 
       {status && <Alert tone={status.type}>{status.message}</Alert>}
 
