@@ -14,11 +14,13 @@ export type ManifestItem = {
 export type AssetDownloadItem = {
   /** 文件名前缀，如 "图片-01" */
   label: string;
-  /** Canva 临时下载 URL */
+  /** Canva 临时下载 URL（扫描后可能过期） */
   url: string;
   assetType: "image" | "video";
   /** 从 URL 中解析出的扩展名，如 ".jpg" */
   urlExt: string;
+  /** 已在后端预缓存的 ID，存在时优先用缓存，不再请求 url */
+  stagedId?: string;
 };
 
 type CollectedRef =
@@ -153,29 +155,14 @@ const inspectElements = (
 ) => {
   for (const element of elements) {
     switch (element.type) {
-      case "text":
-        inspectTextElement(element, items, counters);
-        break;
       case "rect":
         inspectRectElement(element, items, counters, collectedRefs);
         break;
       case "shape":
         inspectShapeElement(element, items, counters, collectedRefs);
         break;
-      case "embed":
-        inspectEmbedElement(element, items, counters);
-        break;
       case "group":
         inspectElements(element.contents.toArray(), items, counters, collectedRefs);
-        break;
-      case "unsupported":
-        counters.unsupported += 1;
-        pushItem(
-          items,
-          `未支持元素-${String(counters.unsupported).padStart(2, "0")}`,
-          "unsupported",
-          "Apps SDK 无法读取详细信息",
-        );
         break;
       default:
         break;
@@ -207,6 +194,20 @@ export const scanCurrentPageAssets = async (
   await openDesign({ type: "current_page" }, async (session) => {
     if (session.page.type === "absolute") {
       inspectElements(session.page.elements.toArray(), items, counters, collectedRefs);
+
+      // 扫描页面背景（视频设计中，时间轴上的主视频轨道是页面背景而非元素）
+      const bgMedia = session.page.background?.mediaContainer?.ref;
+      if (bgMedia?.type === "image") {
+        counters.image += 1;
+        const label = `背景图片-${String(counters.image).padStart(2, "0")}`;
+        collectedRefs.push({ label, itemIndex: items.length + 1, refType: "image", ref: bgMedia.imageRef });
+        pushItem(items, label, "background-image", `imageRef=${bgMedia.imageRef}`);
+      } else if (bgMedia?.type === "video") {
+        counters.video += 1;
+        const label = `背景视频-${String(counters.video).padStart(2, "0")}`;
+        collectedRefs.push({ label, itemIndex: items.length + 1, refType: "video", ref: bgMedia.videoRef });
+        pushItem(items, label, "background-video", `videoRef=${bgMedia.videoRef}`);
+      }
 
       await Promise.all(
         collectedRefs.map(async (collected) => {
