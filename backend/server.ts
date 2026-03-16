@@ -23,13 +23,18 @@ const pendingQueue: Array<{ id: string; fileName: string }> = [];
 
 app.use((req, res, next) => {
   const origin = req.headers.origin ?? "";
-  // 允许 Canva 应用 iframe 域名和本地开发
-  const allowed =
+  const isCanvaOrigin =
     origin.endsWith(".canva-apps.com") ||
     origin.endsWith(".canva.com") ||
+    origin === "https://canva.com" ||
     origin.startsWith("http://localhost") ||
     origin.startsWith("http://127.0.0.1");
-  if (allowed) {
+
+  // GET 接口（/pending /download /health）无敏感数据，允许所有来源
+  // POST 接口（/export-bundle）含导出内容，仅允许 Canva 域
+  if (req.method === "GET" || req.method === "OPTIONS") {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+  } else if (isCanvaOrigin) {
     res.setHeader("Access-Control-Allow-Origin", origin);
   }
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
