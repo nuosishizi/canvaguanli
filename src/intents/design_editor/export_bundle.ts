@@ -8,7 +8,7 @@ const sanitizeFileName = (name: string) =>
 export const preStageAssets = async (assets: AssetDownloadItem[]): Promise<Array<{ stagedId: string; label: string }>> => {
   if (assets.length === 0) return [];
   try {
-    const res = await fetch(`${BACKEND_HOST}/pre-stage-assets`, {
+    const res = await fetch(`${window.BACKEND_HOST || "http://localhost:3001"}/pre-stage-assets`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ assets }),
@@ -39,7 +39,7 @@ export const downloadExportBundle = async ({
     selectedPages && selectedPages.size > 0
       ? response.exportBlobs.filter((_, i) => selectedPages.has(i + 1))
       : response.exportBlobs;
-  const res = await fetch(`${BACKEND_HOST}/export-bundle`, {
+  const res = await fetch(`${window.BACKEND_HOST || "http://localhost:3001"}/export-bundle`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -68,7 +68,7 @@ export const packPluginPages = async (params: {
   manifestJson: string;
   assetDownloadItems: AssetDownloadItem[];
 }): Promise<{ id: string; fileName: string }> => {
-  const res = await fetch(`${BACKEND_HOST}/pack-plugin-pages`, {
+  const res = await fetch(`${window.BACKEND_HOST || "http://localhost:3001"}/pack-plugin-pages`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
