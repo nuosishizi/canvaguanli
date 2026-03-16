@@ -21,7 +21,16 @@ setInterval(() => {
 const pendingQueue: Array<{ id: string; fileName: string }> = [];
 
 app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  const origin = req.headers.origin ?? "";
+  // 允许 Canva 应用 iframe 域名和本地开发
+  const allowed =
+    origin.endsWith(".canva-apps.com") ||
+    origin.endsWith(".canva.com") ||
+    origin.startsWith("http://localhost") ||
+    origin.startsWith("http://127.0.0.1");
+  if (allowed) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 

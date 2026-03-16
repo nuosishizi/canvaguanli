@@ -5,6 +5,7 @@
   "scripts": {
     "extract": "formatjs extract \"src/**/*.{ts,tsx}\" --out-file dist/messages_en.json",
     "build": "webpack --config webpack.config.ts --mode production && npm run extract",
+    "start:backend": "ts-node backend/server.ts",
     "format": "prettier '**/*.{css,ts,tsx}' --no-config --write",
     "format:check": "prettier '**/*.{css,ts,tsx}' --no-config --check --ignore-path",
     "format:file": "prettier $1 --no-config --write",
@@ -29,6 +30,7 @@
     "@canva/platform": "^2.2.2",
     "@canva/user": "^2.1.3",
     "jszip": "^3.10.1",
+    "express": "4.22.1",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-intl": "^7.1.11"
