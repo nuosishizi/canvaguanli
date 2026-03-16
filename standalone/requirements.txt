@@ -3,9 +3,11 @@ flask>=2.3.0
 flask-cors>=4.0.0
 werkzeug>=3.0.0
 requests>=2.31.0
-opencv-python>=4.8.0
+opencv-python-headless>=4.8.0
 Pillow>=10.0.0
 imagehash>=4.3.1
 pymysql>=1.1.0
 numpy>=1.24.0
+scipy>=1.10.0
+PyWavelets>=1.4.0
 

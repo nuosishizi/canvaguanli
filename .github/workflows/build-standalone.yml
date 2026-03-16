@@ -19,7 +19,7 @@ jobs:
       matrix:
         os:
           - windows-latest
-          - macos-latest
+          - macos-13
 
     runs-on: ${{ matrix.os }}
 
@@ -108,9 +108,19 @@ Filename: "{app}\CanvaTools.exe"; Description: "启动 Canva Tools"; Flags: nowa
           cd standalone
           python -m PyInstaller -w -D --add-data "../dist:dist" --name CanvaTools main.py
 
-          APP="dist/CanvaTools.app"
-          if [ ! -d "$APP" ]; then
-            echo "未找到 $APP，列出 dist 目录："
+          echo "=== PyInstaller dist contents ==="
+          ls -la dist/
+
+          # macOS windowed 模式输出为 .app bundle
+          if [ -d "dist/CanvaTools.app" ]; then
+            APP="dist/CanvaTools.app"
+          elif [ -d "dist/CanvaTools" ]; then
+            # 极少数情况仅生成目录，手动转成伪 app bundle
+            mkdir -p "dist/CanvaTools.app/Contents/MacOS"
+            cp -r "dist/CanvaTools/" "dist/CanvaTools.app/Contents/MacOS/"
+            APP="dist/CanvaTools.app"
+          else
+            echo "ERROR: 未找到 PyInstaller 输出，列出 dist："
             ls -la dist/
             exit 1
           fi
