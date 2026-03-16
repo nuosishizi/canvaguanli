@@ -13,7 +13,7 @@ import { downloadExportBundle } from "./export_bundle";
 import { buildManifest } from "./export_manifest";
 
 const BOOKMARKLET =
-  "javascript:(function(){if(window._cvt){clearInterval(window._cvt);}window._cvt=setInterval(function(){fetch('https://canvaguanli-production.up.railway.app/pending',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){if(d.id){var a=document.createElement('a');a.href='https://canvaguanli-production.up.railway.app/download/'+d.id;a.download=d.fileName||'export.zip';document.body.appendChild(a);a.click();a.remove();}}).catch(function(){});},900);})();";
+  "javascript:(function(){if(window._cvt){clearInterval(window._cvt);}window._cvt=setInterval(function(){fetch('https://canvaguanli-production.up.railway.app/pending',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){if(d.id){clearInterval(window._cvt);window.location.href='https://canvaguanli-production.up.railway.app/download/'+d.id;}}).catch(function(){});},900);})();";
 
 type FormatOption = {
   label: string;
