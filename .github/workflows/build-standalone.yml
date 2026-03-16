@@ -6,23 +6,19 @@ on:
     branches:
       - master
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - windows-latest
-          - macos-13
-
-    runs-on: ${{ matrix.os }}
+    runs-on: windows-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
 
@@ -33,7 +29,7 @@ jobs:
         run: npm run build
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.10"
 
@@ -44,7 +40,6 @@ jobs:
           python -m pip install pyinstaller
 
       - name: Build Windows installer
-        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           Set-Location standalone
@@ -93,52 +88,9 @@ jobs:
             exit 1
           }
 
-      - name: Build macOS DMG
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          brew install create-dmg
-
-          cd standalone
-          python -m PyInstaller -w -D --add-data "../dist:dist" --name CanvaTools main.py
-
-          echo "=== PyInstaller dist contents ==="
-          ls -la dist/
-
-          # macOS windowed 模式输出为 .app bundle
-          if [ -d "dist/CanvaTools.app" ]; then
-            APP="dist/CanvaTools.app"
-          elif [ -d "dist/CanvaTools" ]; then
-            # 极少数情况仅生成目录，手动转成伪 app bundle
-            mkdir -p "dist/CanvaTools.app/Contents/MacOS"
-            cp -r "dist/CanvaTools/" "dist/CanvaTools.app/Contents/MacOS/"
-            APP="dist/CanvaTools.app"
-          else
-            echo "ERROR: 未找到 PyInstaller 输出，列出 dist："
-            ls -la dist/
-            exit 1
-          fi
-
-          mkdir -p ../installer_out
-          create-dmg \
-            --volname "CanvaTools" \
-            --window-size 540 380 \
-            --icon-size 128 \
-            --app-drop-link 380 170 \
-            "../installer_out/CanvaTools.dmg" \
-            "$APP"
-
       - name: Upload Windows installer
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: CanvaTools_Windows_Installer
           path: installer_out/CanvaTools_Setup.exe
-
-      - name: Upload macOS DMG
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: CanvaTools_macOS_DMG
-          path: installer_out/CanvaTools.dmg
 
