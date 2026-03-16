@@ -3,8 +3,10 @@ import os
 import threading
 import json
 import subprocess
+import tempfile
 from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QMessageBox, QTextEdit, QGroupBox, QFormLayout, QCheckBox, QSystemTrayIcon, QMenu, QAction, QStyle
-from PyQt5.QtCore import pyqtSignal, QObject, QTimer
+from PyQt5.QtCore import pyqtSignal, QObject, QTimer, QLockFile
+from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 import socket
 from werkzeug.serving import make_server
 
@@ -13,6 +15,22 @@ try:
 except ImportError as e:
     flask_app = None
     print(f"[!] 导入 server 失败: {e}")
+
+INSTANCE_SERVER_NAME = "CanvaToolsLocalServerSingletonV1"
+SINGLE_INSTANCE_LOCK = None
+
+
+def notify_existing_instance_to_show():
+    socket_client = QLocalSocket()
+    socket_client.connectToServer(INSTANCE_SERVER_NAME)
+    if not socket_client.waitForConnected(300):
+        return False
+
+    socket_client.write(b"show")
+    socket_client.flush()
+    socket_client.waitForBytesWritten(300)
+    socket_client.disconnectFromServer()
+    return True
 
 class SignalEmitter(QObject):
     log_signal = pyqtSignal(str)
@@ -33,6 +51,7 @@ class CanvaPluginServer(QWidget):
         super().__init__()
         self.server_thread = None
         self.werkzeug_server = None
+        self.instance_server = None
         self.force_exit = False
         self.tray_icon = None
         self.has_shown_tray_hint = False
@@ -50,6 +69,28 @@ class CanvaPluginServer(QWidget):
         # 如果存在配置，自动启动！
         if self.config:
             QTimer.singleShot(500, self.start_server)
+
+    def setup_single_instance_listener(self):
+        self.instance_server = QLocalServer(self)
+        QLocalServer.removeServer(INSTANCE_SERVER_NAME)
+        if not self.instance_server.listen(INSTANCE_SERVER_NAME):
+            self.append_log("[!] 单实例监听启动失败，重复启动保护可能失效。")
+            return
+        self.instance_server.newConnection.connect(self.on_single_instance_message)
+
+    def on_single_instance_message(self):
+        while self.instance_server and self.instance_server.hasPendingConnections():
+            socket_client = self.instance_server.nextPendingConnection()
+            if socket_client is None:
+                continue
+
+            socket_client.waitForReadyRead(200)
+            payload = bytes(socket_client.readAll()).decode("utf-8", errors="ignore").strip()
+            if payload == "show":
+                self.show_main_window()
+
+            socket_client.disconnectFromServer()
+            socket_client.deleteLater()
 
     def load_config(self):
         if os.path.exists(self.config_file):
@@ -411,9 +452,21 @@ class CanvaPluginServer(QWidget):
             self.has_shown_tray_hint = True
 
 if __name__ == '__main__':
+    # 第二次启动时，优先通知已有实例弹出窗口并直接退出。
+    if notify_existing_instance_to_show():
+        sys.exit(0)
+
+    lock_file_path = os.path.join(tempfile.gettempdir(), "canva_tools_single_instance.lock")
+    SINGLE_INSTANCE_LOCK = QLockFile(lock_file_path)
+    SINGLE_INSTANCE_LOCK.setStaleLockTime(0)
+    if not SINGLE_INSTANCE_LOCK.tryLock(100):
+        notify_existing_instance_to_show()
+        sys.exit(0)
+
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     ex = CanvaPluginServer()
+    ex.setup_single_instance_listener()
     if "--background" in sys.argv:
         ex.hide()
     else:
